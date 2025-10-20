@@ -52,7 +52,7 @@ jobs:
     name: Research (Gemini + Tavily)
     runs-on: ubuntu-latest
     env:
-      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
       TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
       THEME: ${{ github.event.inputs.theme }}
       TARGET: ${{ github.event.inputs.target }}
@@ -165,7 +165,7 @@ jobs:
     needs: research
     runs-on: ubuntu-latest
     env:
-      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
       THEME: ${{ github.event.inputs.theme }}
       TARGET: ${{ github.event.inputs.target }}
       MESSAGE: ${{ github.event.inputs.message }}
@@ -286,7 +286,7 @@ jobs:
     needs: write
     runs-on: ubuntu-latest
     env:
-      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
       TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
       TITLE: ${{ needs.write.outputs.title }}
     outputs:
