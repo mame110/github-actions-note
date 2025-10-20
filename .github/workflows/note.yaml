@@ -84,7 +84,7 @@ jobs:
           const artifactsDir = '.note-artifacts';
           fs.mkdirSync(artifactsDir, { recursive: true });
           const TAVILY_API_KEY = process.env.TAVILY_API_KEY || '';
-          const modelName = 'gemini-1.5-pro-latest'; 
+          const modelName = 'gemini-1.5-flash-latest';
 
           if (!TAVILY_API_KEY) { console.error('TAVILY_API_KEY is not set'); process.exit(1); }
 
@@ -204,7 +204,7 @@ jobs:
           const theme=process.env.THEME||''; const target=process.env.TARGET||''; const message=process.env.MESSAGE||''; const cta=process.env.CTA||'';
           const inputTags=(process.env.INPUT_TAGS||'').split(',').map(s=>s.trim()).filter(Boolean);
           const researchReport=fs.readFileSync('.note-artifacts/research.md','utf8');
-          const modelName='gemini-1.5-pro-latest'; 
+          const modelName = 'gemini-1.5-flash-latest';
           function extractJsonFlexible(raw){const t=(raw||'').trim().replace(/\u200B/g,'');try{return JSON.parse(t);}catch{}const m=t.match(/```[a-zA-Z]*\s*([\s\S]*?)\s*```/);if(m&&m[1]){try{return JSON.parse(m[1].trim());}catch{}}const f=t.indexOf('{'),l=t.lastIndexOf('}');if(f!==-1&&l!==-1&&l>f){const c=t.slice(f,l+1);try{return JSON.parse(c);}catch{}}return null;}
           
           async function repairJson(raw){
@@ -320,7 +320,7 @@ jobs:
           import { google } from '@ai-sdk/google'; // ★★★ここを @ai-sdk/google に修正！★★★
           import fs from 'fs';
           const draft=JSON.parse(fs.readFileSync('.note-artifacts/draft.json','utf8'));
-          const modelName='gemini-1.5-pro-latest'; 
+          const modelName = 'gemini-1.5-flash-latest';
           const TAVILY_API_KEY=process.env.TAVILY_API_KEY||'';
           if(!TAVILY_API_KEY){ console.error('TAVILY_API_KEY is not set'); process.exit(1); }
 
