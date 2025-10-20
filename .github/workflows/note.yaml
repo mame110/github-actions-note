@@ -1,4 +1,4 @@
-name: Note Workflow
+name: Note Workflow (Gemini Ver.) # 名前をちょっと変えたよ
 
 on:
   workflow_dispatch:
@@ -49,10 +49,12 @@ env:
 
 jobs:
   research:
-    name: Research (CCSDK WebSearch/WebFetch)
+    # --- ここから改造ポイント ① research ---
+    name: Research (Gemini + Tavily) # 名前を変えたよ
     runs-on: ubuntu-latest
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }} # ★ClaudeキーからGeminiキーに変更
+      TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }} # ★検索用にTavilyキーも追加
       THEME: ${{ github.event.inputs.theme }}
       TARGET: ${{ github.event.inputs.target }}
     outputs:
@@ -66,44 +68,88 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Claude Code SDK
+      - name: Install AI SDK
         run: |
           npm init -y
-          npm i @anthropic-ai/claude-code
+          npm i ai @ai-sdk/google-generative-ai # ★Claude SDKからGemini SDKに変更
 
-      - name: Research with Claude Code SDK
+      - name: Research with Gemini + Tavily # ★ステップ名を変更
         run: |
           cat > research.mjs <<'EOF'
-          import { query } from '@anthropic-ai/claude-code';
+          // ★↓ここからぜんぶGemini + Tavilyで検索するように大改造したよ！
+          import { generateText } from 'ai'; 
+          import { googleGenerativeAI } from '@ai-sdk/google-generative-ai'; 
           import fs from 'fs';
           const theme = process.env.THEME || '';
           const target = process.env.TARGET || '';
           const today = new Date().toISOString().slice(0,10);
           const artifactsDir = '.note-artifacts';
           fs.mkdirSync(artifactsDir, { recursive: true });
-          const sys = [
-            'あなたは最新情報の収集と要約に特化した超一流のリサーチャーです。',
-            '事実ベース・一次情報優先・本文内にMarkdownリンクで出典を埋め込むこと。',
-            '十分な分量（目安: 2,000語以上）。各節で出典を本文に埋め込む。',
-            'WebSearch と WebFetch を必ず使用し、一次情報（公的機関・規格・論文・公式）を優先する。',
-          ].join('\n');
-          const userPrompt = `以下のテーマとターゲットに対する最終版のリサーチレポートを作成してください。\n【重要】途中経過や確認質問は一切せず、最終レポートのみを返してください。不明点がある場合は「前提と仮定」セクションで簡潔に仮定を明記してから続行してください。事実ベースで一次情報を最優先し、本文にMarkdownリンクで出典を埋め込んでください。\n---\nテーマ: ${theme}\nターゲット: ${target}\n現在日付: ${today}`;
-          const messages = [];
-          for await (const msg of query({
-            prompt: userPrompt,
-            options: {
-              customSystemPrompt: sys,
-              allowedTools: ['WebSearch','WebFetch'],
-              permissionMode: 'acceptEdits',
-            },
-          })) { messages.push(msg); }
-          const assistantTexts = messages.filter(m=>m.type==='assistant').map(m=>{
-            const c=m.message?.content; if(Array.isArray(c)){return c.filter(b=>b?.type==='text').map(b=>b.text).join('\n');} return '';
-          }).filter(Boolean).join('\n\n');
-          fs.writeFileSync(`${artifactsDir}/research.md`, assistantTexts || '');
-          try { fs.writeFileSync(`${artifactsDir}/research_trace.json`, JSON.stringify(messages, null, 2)); } catch {}
+          const TAVILY_API_KEY = process.env.TAVILY_API_KEY || '';
+          const modelName = 'gemini-1.5-pro-latest'; // ★Geminiのモデル名
+
+          if (!TAVILY_API_KEY) { console.error('TAVILY_API_KEY is not set'); process.exit(1); }
+
+          // Tavilyで検索する関数
+          async function tavilySearch(q) {
+            const res = await fetch('https://api.tavily.com/search', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ api_key: TAVILY_API_KEY, query: q, search_depth: 'advanced', max_results: 7, include_answer: true })
+            });
+            if (!res.ok) { return { query: q, results: [], answer: null }; }
+            const json = await res.json().catch(() => ({}));
+            return { query: q, results: Array.isArray(json.results) ? json.results : [], answer: json.answer || null };
+          }
+          
+          // 検索結果をまとめる関数
+          function formatEvidence(items) {
+            const lines = [];
+            for (const it of items) {
+              lines.push(`### 検索クエリ: ${it.query}`);
+              if (it.answer) { lines.push(`Tavilyの回答: ${it.answer}`); }
+              for (const r of it.results || []) {
+                const t = (r.title || '').toString();
+                const u = (r.url || '').toString();
+                const c = (r.content || '').toString().slice(0, 500);
+                lines.push(`- [${t}](${u})\n  ${c}`);
+              }
+              lines.push('');
+            }
+            return lines.join('\n');
+          }
+
+          async function main() {
+            // 1. まずTavilyで検索する
+            const searchQuery = `「${theme}」について、ターゲット「${target}」向けの最新情報。一次情報（公的機関・規格・論文・公式）を優先して検索。`;
+            const searchResult = await tavilySearch(searchQuery);
+            const evidence = formatEvidence([searchResult]);
+            
+            // 2. Geminiでレポートを作成する
+            const sys = [
+              'あなたは最新情報の収集と要約に特化した超一流のリサーチャーです。',
+              '提供された検索結果（エビデンス）に基づき、事実ベースでレポートを作成してください。',
+              '本文内にMarkdownリンクで出典を必ず埋め込むこと。',
+              '十分な分量（目安: 2,000語以上）で、章立てして詳細に記述してください。',
+            ].join('\n');
+            const userPrompt = `以下のテーマ、ターゲット、エビデンスに基づき、最終版のリサーチレポートを作成してください。\n【重要】途中経過や確認質問は一切せず、最終レポートのみを返してください。\n---\nテーマ: ${theme}\nターゲット: ${target}\n現在日付: ${today}\n\n## エビデンス（Tavily検索結果）\n${evidence}`;
+            
+            const { text } = await generateText({
+              model: googleGenerativeAI(modelName), // ★Geminiモデルを指定
+              system: sys,
+              prompt: userPrompt,
+              temperature: 0.5,
+              maxTokens: 8000,
+            });
+            
+            const assistantTexts = text || '';
+            fs.writeFileSync(`${artifactsDir}/research.md`, assistantTexts);
+            try { fs.writeFileSync(`${artifactsDir}/research_trace.json`, JSON.stringify({ searchResult, report: assistantTexts }, null, 2)); } catch {}
+          }
+          
+          await main();
           EOF
           node research.mjs
+    # --- ここまで改造ポイント ① research ---
 
       - name: Collect research
         id: collect
@@ -122,11 +168,12 @@ jobs:
             .note-artifacts/research_trace.json
 
   write:
-    name: Write (Claude Sonnet 4.0)
+    # --- ここから改造ポイント ② write ---
+    name: Write (Gemini) # 名前を変えたよ
     needs: research
     runs-on: ubuntu-latest
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }} # ★ClaudeキーからGeminiキーに変更
       THEME: ${{ github.event.inputs.theme }}
       TARGET: ${{ github.event.inputs.target }}
       MESSAGE: ${{ github.event.inputs.message }}
@@ -147,7 +194,7 @@ jobs:
       - name: Install AI SDK
         run: |
           npm init -y
-          npm i ai @ai-sdk/anthropic
+          npm i ai @ai-sdk/google-generative-ai # ★Claude SDKからGemini SDKに変更
 
       - name: Restore research
         env:
@@ -160,17 +207,30 @@ jobs:
         run: |
           cat > write.mjs <<'EOF'
           import { generateText } from 'ai';
-          import { anthropic } from '@ai-sdk/anthropic';
+          import { googleGenerativeAI } from '@ai-sdk/google-generative-ai'; // ★anthropic から変更
           import fs from 'fs';
           const theme=process.env.THEME||''; const target=process.env.TARGET||''; const message=process.env.MESSAGE||''; const cta=process.env.CTA||'';
           const inputTags=(process.env.INPUT_TAGS||'').split(',').map(s=>s.trim()).filter(Boolean);
           const researchReport=fs.readFileSync('.note-artifacts/research.md','utf8');
-          const modelName='claude-sonnet-4-5-20250929';
+          const modelName='gemini-1.5-pro-latest'; // ★claudeからGeminiのモデル名に変更
           function extractJsonFlexible(raw){const t=(raw||'').trim().replace(/\u200B/g,'');try{return JSON.parse(t);}catch{}const m=t.match(/```[a-zA-Z]*\s*([\s\S]*?)\s*```/);if(m&&m[1]){try{return JSON.parse(m[1].trim());}catch{}}const f=t.indexOf('{'),l=t.lastIndexOf('}');if(f!==-1&&l!==-1&&l>f){const c=t.slice(f,l+1);try{return JSON.parse(c);}catch{}}return null;}
-          async function repairJson(raw){const sys='入力から {"title":string,"draftBody":string,"tags":string[]} のJSONのみ返答。';const {text}=await generateText({model:anthropic(modelName),system:sys,prompt:String(raw),temperature:0,maxTokens:8000});return extractJsonFlexible(text||'');}
+          
+          async function repairJson(raw){
+            // ★Gemini用にJSONを返すように呪文（プロンプト）を調整
+            const sys='あなたはJSON整形アシスタントです。入力されたテキストから、{"title":string,"draftBody":string,"tags":string[]} の形式でJSONオブジェクトを抽出または生成し、JSON文字列のみを返してください。JSON以外のテキストは一切含めないでください。';
+            const {text}=await generateText({
+              model: googleGenerativeAI(modelName), // ★anthropic から変更
+              system:sys,
+              prompt:String(raw),
+              temperature:0,
+              maxTokens:8000,
+              responseFormat: { type: 'json' }, // ★GeminiにJSONを強制する
+            });
+            return extractJsonFlexible(text||'');
+          }
+          
           function sanitizeTitle(t){
             let s=String(t||'').trim();
-            // フェンスや見出し、引用符を除去
             s=s.replace(/^```[a-zA-Z0-9_-]*\s*$/,'').replace(/^```$/,'');
             s=s.replace(/^#+\s*/,'');
             s=s.replace(/^"+|"+$/g,'').replace(/^'+|'+$/g,'');
@@ -184,9 +244,27 @@ jobs:
             const firstReal=lines.find(l=>!/^```/.test(l))||lines[0]||'';
             return sanitizeTitle(firstReal);
           }
-          const sysWrite='note.com向け長文記事の生成。JSON {title,draftBody,tags[]} で返答。draftBodyは6000〜9000文字を目安に十分な分量で、章ごとに小見出しと箇条書きを適切に含めること。';
-          const prompt=[`{テーマ}: ${theme}`,`{ペルソナ}: ${target}`,`{リサーチ内容}: ${researchReport}`,`{伝えたいこと}: ${message}`,`{読後のアクション}: ${cta}`].join('\n');
-          const {text}=await generateText({model:anthropic(modelName),system:sysWrite,prompt,temperature:0.7,maxTokens:30000});
+          
+          // ★Gemini用にJSONを返すように呪文（プロンプト）を調整
+          const sysWrite='あなたはnote.comに投稿するためのプロのライターです。長文の魅力的な記事を生成してください。\n必ず {"title":"記事タイトル","draftBody":"Markdown形式の記事本文","tags":["タグ1","タグ2"]} という厳密なJSON形式で返答してください。JSON以外のテキストは絶対に含めないでください。\ndraftBodyは6000〜9000文字を目安に十分な分量で、読者を惹きつける導入、具体的な内容（章ごとにH2（##）やH3（###）の小見出しと箇条書きを適切に含めること）、そして読後のアクション（CTA）に繋がる明確な結論を含めてください。';
+          const prompt=[
+            "以下の要件とリサーチ内容に基づき、note.com用の記事をJSON形式で生成してください。",
+            `{テーマ}: ${theme}`,
+            `{ペルソナ（読者）}: ${target}`,
+            `{リサーチ内容}: ${researchReport}`,
+            `{記事で伝えたい核メッセージ}: ${message}`,
+            `{読後のアクション(CTA)}: ${cta}`
+          ].join('\n');
+          
+          const {text}=await generateText({
+            model: googleGenerativeAI(modelName), // ★anthropic から変更
+            system:sysWrite,
+            prompt,
+            temperature:0.7,
+            maxTokens:30000,
+            responseFormat: { type: 'json' }, // ★GeminiにJSONを強制する
+          });
+          
           let obj=extractJsonFlexible(text||'')||await repairJson(text||'');
           let title, draftBody, tags; if(obj){title=sanitizeTitle(obj.title); draftBody=String(obj.draftBody||'').trim(); tags=Array.isArray(obj.tags)?obj.tags.map(String):[]}
           if(!title||!draftBody){ title=deriveTitleFromText(text||''); const lines=(text||'').split(/\r?\n/); draftBody=lines.slice(1).join('\n').trim()||(text||''); tags=[]}
@@ -194,6 +272,7 @@ jobs:
           fs.writeFileSync('.note-artifacts/draft.json',JSON.stringify({title,draftBody,tags},null,2));
           EOF
           node write.mjs
+    # --- ここまで改造ポイント ② write ---
 
       - name: Collect draft
         id: collect
@@ -214,11 +293,12 @@ jobs:
           path: .note-artifacts/draft.json
 
   factcheck:
-    name: Fact-check (Tavily)
+    # --- ここから改造ポイント ③ factcheck ---
+    name: Fact-check (Gemini + Tavily) # 名前を変えたよ
     needs: write
     runs-on: ubuntu-latest
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }} # ★ClaudeキーからGeminiキーに変更
       TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
       TITLE: ${{ needs.write.outputs.title }}
     outputs:
@@ -236,7 +316,7 @@ jobs:
       - name: Install AI SDK
         run: |
           npm init -y
-          npm i ai @ai-sdk/anthropic
+          npm i ai @ai-sdk/google-generative-ai # ★Claude SDKからGemini SDKに変更
 
       - name: Restore draft json
         env:
@@ -249,21 +329,18 @@ jobs:
         run: |
           cat > factcheck.mjs <<'EOF'
           import { generateText } from 'ai';
-          import { anthropic } from '@ai-sdk/anthropic';
+          import { googleGenerativeAI } from '@ai-sdk/google-generative-ai'; // ★anthropic から変更
           import fs from 'fs';
           const draft=JSON.parse(fs.readFileSync('.note-artifacts/draft.json','utf8'));
-          const modelName='claude-sonnet-4-5-20250929';
+          const modelName='gemini-1.5-pro-latest'; // ★claudeからGeminiのモデル名に変更
           const TAVILY_API_KEY=process.env.TAVILY_API_KEY||'';
           if(!TAVILY_API_KEY){ console.error('TAVILY_API_KEY is not set'); process.exit(1); }
 
           function extractJsonFlexible(raw){
             const t=(raw||'').trim().replace(/\u200B/g,'');
-            // try object
             try{ const o=JSON.parse(t); return o; }catch{}
             const fence=t.match(/```[a-zA-Z]*\s*([\s\S]*?)\s*```/); if(fence&&fence[1]){ try{ return JSON.parse(fence[1].trim()); }catch{} }
-            // try object slice
             let f=t.indexOf('{'), l=t.lastIndexOf('}'); if(f!==-1&&l!==-1&&l>f){ const cand=t.slice(f,l+1); try{ return JSON.parse(cand); }catch{} }
-            // try array slice
             f=t.indexOf('['); l=t.lastIndexOf(']'); if(f!==-1&&l!==-1&&l>f){ const cand=t.slice(f,l+1); try{ return JSON.parse(cand); }catch{} }
             return null;
           }
@@ -274,14 +351,22 @@ jobs:
           }
 
           async function proposeQueries(body){
-            const sys='あなたは事実検証の専門家です。入力本文から検証が必要な固有名詞・数値・主張を抽出し、Tavily検索用に日本語の検索クエリを最大10件の配列で返してください。出力はJSON配列のみ。';
-            const { text } = await generateText({ model: anthropic(modelName), system: sys, prompt: String(body), temperature: 0, maxTokens: 2000 });
+            // ★Gemini用にJSONを返すように呪文（プロンプト）を調整
+            const sys='あなたは事実検証の専門家です。入力本文から検証が必要な固有名詞・数値・主張を抽出し、Tavily検索用に日本語の検索クエリを最大10件の配列で返してください。出力は ["クエリ1", "クエリ2"] という厳密なJSON配列のみを返してください。JSON以外のテキストは一切含めないでください。';
+            const { text } = await generateText({
+              model: googleGenerativeAI(modelName), // ★anthropic から変更
+              system: sys,
+              prompt: String(body),
+              temperature: 0,
+              maxTokens: 2000,
+              responseFormat: { type: 'json' }, // ★GeminiにJSONを強制する
+            });
             const arr = extractJsonFlexible(text||'');
             return Array.isArray(arr) ? arr.map(String).filter(Boolean).slice(0,10) : [];
           }
 
           async function tavilySearch(q){
-            const res = await fetch('https://api.tavily.com/search', {
+            const res = await fetch('[https://api.tavily.com/search](https://api.tavily.com/search)', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ api_key: TAVILY_API_KEY, query: q, search_depth: 'advanced', max_results: 5, include_answer: true })
             });
@@ -315,11 +400,20 @@ jobs:
               'あなたは事実検証の専門家です。以下の原稿（note記事の下書き）に対し、提供されたエビデンス（Tavily検索結果）に基づき、',
               '誤情報の修正・低信頼出典の置換・信頼できる一次情報の本文内Markdownリンク埋め込みを行って、修正後の本文のみ返してください。',
               '文体・構成は原稿を尊重し、必要に応じて本文末尾に参考文献セクションを追加してください。',
+              '【重要】JSONやコードフェンス（```）は絶対に使わず、Markdownの本文だけを返してください。', // ★Gemini用に呪文を調整
             ].join('\n');
             const prompt = [
               '## 原稿', String(draft.draftBody||''), '', '## エビデンス（Tavily検索結果）', evidence
             ].join('\n\n');
-            const { text } = await generateText({ model: anthropic(modelName), system: sys, prompt, temperature: 0.3, maxTokens: 30000 });
+            
+            const { text } = await generateText({
+              model: googleGenerativeAI(modelName), // ★anthropic から変更
+              system: sys,
+              prompt,
+              temperature: 0.3,
+              maxTokens: 30000,
+            });
+            
             let body = stripCodeFence(text||'');
             let title = process.env.TITLE || draft.title || '';
             let tags = Array.isArray(draft.tags)? draft.tags: [];
@@ -339,6 +433,7 @@ jobs:
           await main();
           EOF
           node factcheck.mjs
+    # --- ここまで改造ポイント ③ factcheck ---
 
       - name: Upload fact-check artifact
         uses: actions/upload-artifact@v4
@@ -359,6 +454,7 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
   post:
+    # --- ↓ここは改造しなくてOK！そのまま！ ---
     name: Post to note.com (Playwright)
     needs: factcheck
     if: ${{ github.event.inputs.dry_run != 'true' }}
@@ -684,4 +780,3 @@ jobs:
         with:
           name: note-screenshot
           path: ${{ steps.publish.outputs.screenshot }}
-
