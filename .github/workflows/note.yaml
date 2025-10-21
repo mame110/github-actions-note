@@ -745,11 +745,20 @@ jobs:
             const finalUrl=page.url();
             console.log('PUBLISHED_URL=' + finalUrl);
             console.log('SCREENSHOT=' + SS_PATH);
-          } finally {
-            try{ await page?.close(); }catch{}
-            try{ await context?.close(); }catch{}
-            try{ await browser?.close(); }catch{}
-          }
+　　　　　　　} finally {
+  try { 
+    if (page) {
+      console.log('Taking screenshot in finally block...');
+      await page.screenshot({ path: SS_PATH, fullPage: true });
+      console.log('SCREENSHOT=' + SS_PATH);
+    }
+  } catch(e) {
+    console.log('Failed to take screenshot in finally:', e.message);
+  }
+  try{ await page?.close(); }catch{}
+  try{ await context?.close(); }catch{}
+  try{ await browser?.close(); }catch{}
+}
           EOF
           node post.mjs | tee post.log
           url=$(grep '^PUBLISHED_URL=' post.log | tail -n1 | cut -d'=' -f2-)
@@ -760,7 +769,7 @@ jobs:
           if [ -n "$shot" ]; then echo "screenshot=$shot" >> $GITHUB_OUTPUT; fi
 
       - name: Upload screenshot (if any)
-        if: ${{ steps.publish.outputs.screenshot != '' }}
+        if: always(){{ steps.publish.outputs.screenshot != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: note-screenshot
