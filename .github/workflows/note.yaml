@@ -52,7 +52,6 @@ jobs:
     name: Research (Gemini + Tavily)
     runs-on: ubuntu-latest
     env:
-      # --- 修正① APIキーの名前を直す ---
       GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
       TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
       THEME: ${{ github.event.inputs.theme }}
@@ -85,8 +84,7 @@ const today = new Date().toISOString().slice(0,10);
 const artifactsDir = '.note-artifacts';
 fs.mkdirSync(artifactsDir, { recursive: true });
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY || '';
-// --- 修正② モデル名を無料枠で使えるやつに直す ---
-const modelName = 'gemini-2.0-flash-lite'; 
+const modelName = 'gemini-2.0-flash-lite';
 
 if (!TAVILY_API_KEY) { console.error('TAVILY_API_KEY is not set'); process.exit(1); }
 
@@ -167,7 +165,6 @@ EOF
     needs: research
     runs-on: ubuntu-latest
     env:
-      # --- 修正① APIキーの名前を直す ---
       GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
       THEME: ${{ github.event.inputs.theme }}
       TARGET: ${{ github.event.inputs.target }}
@@ -207,8 +204,7 @@ import fs from 'fs';
 const theme=process.env.THEME||''; const target=process.env.TARGET||''; const message=process.env.MESSAGE||''; const cta=process.env.CTA||'';
 const inputTags=(process.env.INPUT_TAGS||'').split(',').map(s=>s.trim()).filter(Boolean);
 const researchReport=fs.readFileSync('.note-artifacts/research.md','utf8');
-// --- 修正② モデル名を無料枠で使えるやつに直す ---
-const modelName='gemini-2.0-flash-lite'; 
+const modelName='gemini-2.0-flash-lite';
 function extractJsonFlexible(raw){const t=(raw||'').trim().replace(/\u200B/g,'');try{return JSON.parse(t);}catch{}const m=t.match(/```[a-zA-Z]*\s*([\s\S]*?)\s*```/);if(m&&m[1]){try{return JSON.parse(m[1].trim());}catch{}}const f=t.indexOf('{'),l=t.lastIndexOf('}');if(f!==-1&&l!==-1&&l>f){const c=t.slice(f,l+1);try{return JSON.parse(c);}catch{}}return null;}
 
 async function repairJson(raw){
@@ -288,7 +284,6 @@ EOF
     needs: write
     runs-on: ubuntu-latest
     env:
-      # --- 修正① APIキーの名前を直す ---
       GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
       TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
       TITLE: ${{ needs.write.outputs.title }}
@@ -323,7 +318,6 @@ import { generateText } from 'ai';
 import { google } from '@ai-sdk/google';
 import fs from 'fs';
 const draft=JSON.parse(fs.readFileSync('.note-artifacts/draft.json','utf8'));
-// --- 修正② モデル名を無料枠で使えるやつに直す ---
 const modelName='gemini-2.0-flash-lite'; 
 const TAVILY_API_KEY=process.env.TAVILY_API_KEY||'';
 if(!TAVILY_API_KEY){ console.error('TAVILY_API_KEY is not set'); process.exit(1); }
@@ -356,7 +350,6 @@ async function proposeQueries(body){
 }
 
 async function tavilySearch(q){
-  // --- 修正③ URLのコピペミスを直す ---
   const res = await fetch('[https://api.tavily.com/search](https://api.tavily.com/search)', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ api_key: TAVILY_API_KEY, query: q, search_depth: 'advanced', max_results: 5, include_answer: true })
@@ -697,11 +690,7 @@ try{
     const saveBtn = page.locator('button:has-text("下書き保存"), [aria-label*="下書き保存"]').first();
     await saveBtn.waitFor({ state: 'visible' });
     if(await saveBtn.isEnabled()) { await saveBtn.click(); await page.locator('text=保存しました').waitFor({ timeout: 4000 }).catch(()=>{}); }
-    // ★★★「finally」に移動したので、ここのスクショは消す★★★
-    // await page.screenshot({ path: SS_PATH, fullPage: true }); 
     console.log('DRAFT_URL=' + page.url());
-    // ★★★「finally」に移動したので、ここのスクショは消す★★★
-    // console.log('SCREENSHOT=' + SS_PATH); 
     process.exit(0);
   }
 
@@ -734,14 +723,9 @@ try{
     page.waitForTimeout(5000),
   ]);
 
-  // ★★★「finally」に移動したので、ここのスクショは消す★★★
-  // await page.screenshot({ path: SS_PATH, fullPage: true });
   const finalUrl=page.url();
   console.log('PUBLISHED_URL=' + finalUrl);
-  // ★★★「finally」に移動したので、ここのスクショは消す★★★
-  // console.log('SCREENSHOT=' + SS_PATH);
 } finally {
-  // --- 修正④ エラーでもスクショを撮る(インデント修正版) ---
   try { 
     if (page) {
       console.log('Taking screenshot in finally block...');
@@ -765,7 +749,6 @@ EOF
           if [ -n "$shot" ]; then echo "screenshot=$shot" >> $GITHUB_OUTPUT; fi
 
       - name: Upload screenshot (if any)
-        # --- 修正⑤ エラーでもスクショをアップする ---
         if: always()
         uses: actions/upload-artifact@v4
         with:
