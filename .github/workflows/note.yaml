@@ -84,8 +84,8 @@ jobs:
           const artifactsDir = '.note-artifacts';
           fs.mkdirSync(artifactsDir, { recursive: true });
           const TAVILY_API_KEY = process.env.TAVILY_API_KEY || '';
-          const modelName = 'gemini-1.5-flash-latest';
-
+          const modelName = 'gemini-2.0-flash-lite';
+          
           if (!TAVILY_API_KEY) { console.error('TAVILY_API_KEY is not set'); process.exit(1); }
 
           async function tavilySearch(q) {
@@ -204,7 +204,7 @@ jobs:
           const theme=process.env.THEME||''; const target=process.env.TARGET||''; const message=process.env.MESSAGE||''; const cta=process.env.CTA||'';
           const inputTags=(process.env.INPUT_TAGS||'').split(',').map(s=>s.trim()).filter(Boolean);
           const researchReport=fs.readFileSync('.note-artifacts/research.md','utf8');
-          const modelName = 'gemini-1.5-flash-latest';
+          const modelName = 'gemini-2.0-flash-lite';
           function extractJsonFlexible(raw){const t=(raw||'').trim().replace(/\u200B/g,'');try{return JSON.parse(t);}catch{}const m=t.match(/```[a-zA-Z]*\s*([\s\S]*?)\s*```/);if(m&&m[1]){try{return JSON.parse(m[1].trim());}catch{}}const f=t.indexOf('{'),l=t.lastIndexOf('}');if(f!==-1&&l!==-1&&l>f){const c=t.slice(f,l+1);try{return JSON.parse(c);}catch{}}return null;}
           
           async function repairJson(raw){
@@ -320,7 +320,7 @@ jobs:
           import { google } from '@ai-sdk/google'; // ★★★ここを @ai-sdk/google に修正！★★★
           import fs from 'fs';
           const draft=JSON.parse(fs.readFileSync('.note-artifacts/draft.json','utf8'));
-          const modelName = 'gemini-1.5-flash-latest';
+          const modelName = 'gemini-2.0-flash-lite';
           const TAVILY_API_KEY=process.env.TAVILY_API_KEY||'';
           if(!TAVILY_API_KEY){ console.error('TAVILY_API_KEY is not set'); process.exit(1); }
 
@@ -353,7 +353,7 @@ jobs:
           }
 
           async function tavilySearch(q){
-            const res = await fetch('[https://api.tavily.com/search](https://api.tavily.com/search)', {
+            const res = await fetch('https://api.tavily.com/search', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ api_key: TAVILY_API_KEY, query: q, search_depth: 'advanced', max_results: 5, include_answer: true })
             });
@@ -745,11 +745,20 @@ jobs:
             const finalUrl=page.url();
             console.log('PUBLISHED_URL=' + finalUrl);
             console.log('SCREENSHOT=' + SS_PATH);
-          } finally {
-            try{ await page?.close(); }catch{}
-            try{ await context?.close(); }catch{}
-            try{ await browser?.close(); }catch{}
-          }
+　　　　　　　} finally {
+  try { 
+    if (page) {
+      console.log('Taking screenshot in finally block...');
+      await page.screenshot({ path: SS_PATH, fullPage: true });
+      console.log('SCREENSHOT=' + SS_PATH);
+    }
+  } catch(e) {
+    console.log('Failed to take screenshot in finally:', e.message);
+  }
+  try{ await page?.close(); }catch{}
+  try{ await context?.close(); }catch{}
+  try{ await browser?.close(); }catch{}
+}
           EOF
           node post.mjs | tee post.log
           url=$(grep '^PUBLISHED_URL=' post.log | tail -n1 | cut -d'=' -f2-)
@@ -760,7 +769,7 @@ jobs:
           if [ -n "$shot" ]; then echo "screenshot=$shot" >> $GITHUB_OUTPUT; fi
 
       - name: Upload screenshot (if any)
-        if: ${{ steps.publish.outputs.screenshot != '' }}
+        if: always(){{ steps.publish.outputs.screenshot != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: note-screenshot
