@@ -71,6 +71,7 @@ jobs:
         run: |
           npm init -y
           npm i ai @ai-sdk/google # ★★★ここを @ai-sdk/google に修正！★★★
+
       - name: Research with Gemini + Tavily
         run: |
           cat > research.mjs <<'EOF'
@@ -83,9 +84,10 @@ jobs:
           const artifactsDir = '.note-artifacts';
           fs.mkdirSync(artifactsDir, { recursive: true });
           const TAVILY_API_KEY = process.env.TAVILY_API_KEY || '';
-          const modelName = 'gemini-2.0-flash-lite';
-          
+          const modelName = 'gemini-1.5-flash-latest';
+
           if (!TAVILY_API_KEY) { console.error('TAVILY_API_KEY is not set'); process.exit(1); }
+
           async function tavilySearch(q) {
             const res = await fetch('https://api.tavily.com/search', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -111,6 +113,7 @@ jobs:
             }
             return lines.join('\n');
           }
+
           async function main() {
             const searchQuery = `「${theme}」について、ターゲット「${target}」向けの最新情報。一次情報（公的機関・規格・論文・公式）を優先して検索。`;
             const searchResult = await tavilySearch(searchQuery);
@@ -140,6 +143,7 @@ jobs:
           await main();
           EOF
           node research.mjs
+
       - name: Collect research
         id: collect
         run: |
@@ -147,6 +151,7 @@ jobs:
           echo "research_b64<<EOF" >> $GITHUB_OUTPUT
           echo "$b64" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Upload research artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -154,6 +159,7 @@ jobs:
           path: |
             .note-artifacts/research.md
             .note-artifacts/research_trace.json
+
   write:
     name: Write (Gemini)
     needs: research
@@ -181,12 +187,14 @@ jobs:
         run: |
           npm init -y
           npm i ai @ai-sdk/google # ★★★ここを @ai-sdk/google に修正！★★★
+
       - name: Restore research
         env:
           RESEARCH_B64: ${{ needs.research.outputs.research_b64 }}
         run: |
           mkdir -p .note-artifacts
           echo "$RESEARCH_B64" | base64 -d > .note-artifacts/research.md || echo "$RESEARCH_B64" | base64 --decode > .note-artifacts/research.md
+
       - name: Generate draft (title/body/tags)
         run: |
           cat > write.mjs <<'EOF'
@@ -196,7 +204,7 @@ jobs:
           const theme=process.env.THEME||''; const target=process.env.TARGET||''; const message=process.env.MESSAGE||''; const cta=process.env.CTA||'';
           const inputTags=(process.env.INPUT_TAGS||'').split(',').map(s=>s.trim()).filter(Boolean);
           const researchReport=fs.readFileSync('.note-artifacts/research.md','utf8');
-          const modelName = 'gemini-2.0-flash-lite';
+          const modelName = 'gemini-1.5-flash-latest';
           function extractJsonFlexible(raw){const t=(raw||'').trim().replace(/\u200B/g,'');try{return JSON.parse(t);}catch{}const m=t.match(/```[a-zA-Z]*\s*([\s\S]*?)\s*```/);if(m&&m[1]){try{return JSON.parse(m[1].trim());}catch{}}const f=t.indexOf('{'),l=t.lastIndexOf('}');if(f!==-1&&l!==-1&&l>f){const c=t.slice(f,l+1);try{return JSON.parse(c);}catch{}}return null;}
           
           async function repairJson(raw){
@@ -254,6 +262,7 @@ jobs:
           fs.writeFileSync('.note-artifacts/draft.json',JSON.stringify({title,draftBody,tags},null,2));
           EOF
           node write.mjs
+
       - name: Collect draft
         id: collect
         run: |
@@ -265,6 +274,7 @@ jobs:
           echo "draft_json_b64<<EOF" >> $GITHUB_OUTPUT
           echo "$b64" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Upload draft artifact
         uses: actions/upload-artifact@v4
         with:
@@ -295,12 +305,14 @@ jobs:
         run: |
           npm init -y
           npm i ai @ai-sdk/google # ★★★ここを @ai-sdk/google に修正！★★★
+
       - name: Restore draft json
         env:
           DRAFT_JSON_B64: ${{ needs.write.outputs.draft_json_b64 }}
         run: |
           mkdir -p .note-artifacts
           echo "$DRAFT_JSON_B64" | base64 -d > .note-artifacts/draft.json || echo "$DRAFT_JSON_B64" | base64 --decode > .note-artifacts/draft.json
+
       - name: Fact-check with Tavily
         run: |
           cat > factcheck.mjs <<'EOF'
@@ -308,9 +320,10 @@ jobs:
           import { google } from '@ai-sdk/google'; // ★★★ここを @ai-sdk/google に修正！★★★
           import fs from 'fs';
           const draft=JSON.parse(fs.readFileSync('.note-artifacts/draft.json','utf8'));
-          const modelName = 'gemini-2.0-flash-lite';
+          const modelName = 'gemini-1.5-flash-latest';
           const TAVILY_API_KEY=process.env.TAVILY_API_KEY||'';
           if(!TAVILY_API_KEY){ console.error('TAVILY_API_KEY is not set'); process.exit(1); }
+
           function extractJsonFlexible(raw){
             const t=(raw||'').trim().replace(/\u200B/g,'');
             try{ const o=JSON.parse(t); return o; }catch{}
@@ -324,6 +337,7 @@ jobs:
             const m=t.match(/^```[a-zA-Z0-9_-]*\s*([\s\S]*?)\s*```\s*$/); if(m&&m[1]) return m[1].trim();
             return t;
           }
+
           async function proposeQueries(body){
             const sys='あなたは事実検証の専門家です。入力本文から検証が必要な固有名詞・数値・主張を抽出し、Tavily検索用に日本語の検索クエリを最大10件の配列で返してください。出力は ["クエリ1", "クエリ2"] という厳密なJSON配列のみを返してください。JSON以外のテキストは一切含めないでください。';
             const { text } = await generateText({
@@ -337,8 +351,9 @@ jobs:
             const arr = extractJsonFlexible(text||'');
             return Array.isArray(arr) ? arr.map(String).filter(Boolean).slice(0,10) : [];
           }
+
           async function tavilySearch(q){
-            const res = await fetch('https://api.tavily.com/search', {
+            const res = await fetch('[https://api.tavily.com/search](https://api.tavily.com/search)', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ api_key: TAVILY_API_KEY, query: q, search_depth: 'advanced', max_results: 5, include_answer: true })
             });
@@ -346,6 +361,7 @@ jobs:
             const json = await res.json().catch(()=>({}));
             return { query:q, results: Array.isArray(json.results)? json.results: [], answer: json.answer || null };
           }
+
           function formatEvidence(items){
             const lines = [];
             for(const it of items){
@@ -361,6 +377,7 @@ jobs:
             }
             return lines.join('\n');
           }
+
           async function main(){
             const queries = await proposeQueries(draft.draftBody||'');
             const results = [];
@@ -399,9 +416,11 @@ jobs:
             const out = { title, body, tags };
             fs.writeFileSync('.note-artifacts/final.json', JSON.stringify(out,null,2));
           }
+
           await main();
           EOF
           node factcheck.mjs
+
       - name: Upload fact-check artifact
         uses: actions/upload-artifact@v4
         with:
@@ -419,6 +438,7 @@ jobs:
           echo "final_b64<<EOF" >> $GITHUB_OUTPUT
           echo "$b64" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
   post:
     name: Post to note.com (Playwright)
     needs: factcheck
@@ -444,6 +464,7 @@ jobs:
           npm init -y
           npm i playwright marked
           npx playwright install --with-deps chromium | cat
+
       - name: Prepare storageState
         id: state
         run: |
@@ -451,12 +472,14 @@ jobs:
           mkdir -p "$RUNNER_TEMP"
           echo "$STATE_JSON" > "$RUNNER_TEMP/note-state.json"
           echo "STATE_PATH=$RUNNER_TEMP/note-state.json" >> $GITHUB_OUTPUT
+
       - name: Ensure jq (post)
         run: |
           if ! command -v jq >/dev/null 2>&1; then
             sudo apt-get update -y
             sudo apt-get install -y jq
           fi
+
       - name: Restore final
         id: draft
         env:
@@ -466,6 +489,7 @@ jobs:
           echo "$FINAL_B64" | base64 -d > final.json || echo "$FINAL_B64" | base64 --decode > final.json
           echo "TITLE=$(jq -r .title final.json)" >> $GITHUB_OUTPUT
           echo "TAGS=$(jq -r '.tags | join(", ")' final.json)" >> $GITHUB_OUTPUT
+
       - name: Publish via Playwright (draft or public)
         id: publish
         env:
@@ -480,7 +504,9 @@ jobs:
           import fs from 'fs';
           import os from 'os';
           import path from 'path';
+
           function nowStr(){ const d=new Date(); const z=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}_${z(d.getHours())}-${z(d.getMinutes())}-${z(d.getSeconds())}`; }
+
           const STATE_PATH=process.env.STATE_PATH;
           const START_URL=process.env.START_URL||'https://editor.note.com/new';
           const rawTitle=process.env.TITLE||'';
@@ -488,8 +514,11 @@ jobs:
           const rawBody=String(rawFinal.body||'');
           const TAGS=process.env.TAGS||'';
           const IS_PUBLIC=String(process.env.IS_PUBLIC||'false')==='true';
+
           if(!fs.existsSync(STATE_PATH)){ console.error('storageState not found:', STATE_PATH); process.exit(1); }
+
           const ssDir=path.join(os.tmpdir(),'note-screenshots'); fs.mkdirSync(ssDir,{recursive:true}); const SS_PATH=path.join(ssDir,`note-post-${nowStr()}.png`);
+
           function sanitizeTitle(t){
             let s=String(t||'').trim();
             s=s.replace(/^```[a-zA-Z0-9_-]*\s*$/,'').replace(/^```$/,'');
@@ -623,6 +652,7 @@ jobs:
               document.execCommand('insertHTML', false, html);
             }, html);
           }
+
           let TITLE=sanitizeTitle(rawTitle);
           let preBody = preferBareUrls(rawBody);
           preBody = normalizeBullets(preBody);
@@ -633,15 +663,18 @@ jobs:
             if(d) TITLE=d;
           }
           const blocks = splitMarkdownBlocks(preBody);
+
           let browser, context, page;
           try{
             browser = await chromium.launch({ headless: true, args: ['--lang=ja-JP'] });
             context = await browser.newContext({ storageState: STATE_PATH, locale: 'ja-JP' });
             page = await context.newPage();
             page.setDefaultTimeout(180000);
+
             await page.goto(START_URL, { waitUntil: 'domcontentloaded' });
             await page.waitForSelector('textarea[placeholder*="タイトル"]');
             await page.fill('textarea[placeholder*="タイトル"]', TITLE);
+
             const bodyBox = page.locator('div[contenteditable="true"][role="textbox"]').first();
             await bodyBox.waitFor({ state: 'visible' });
             const htmlAll = htmlFromMarkdown(preBody);
@@ -668,6 +701,7 @@ jobs:
               await insertHTML(page, bodyBox, htmlAll);
               await page.waitForTimeout(100);
             }
+
             if(!IS_PUBLIC){
               const saveBtn = page.locator('button:has-text("下書き保存"), [aria-label*="下書き保存"]').first();
               await saveBtn.waitFor({ state: 'visible' });
@@ -677,14 +711,17 @@ jobs:
               console.log('SCREENSHOT=' + SS_PATH);
               process.exit(0);
             }
+
             const proceed = page.locator('button:has-text("公開に進む")').first();
             await proceed.waitFor({ state: 'visible' });
             for (let i=0;i<20;i++){ if (await proceed.isEnabled()) break; await page.waitForTimeout(100); }
             await proceed.click({ force: true });
+
             await Promise.race([
               page.waitForURL(/\/publish/i).catch(() => {}),
               page.locator('button:has-text("投稿する")').first().waitFor({ state: 'visible' }).catch(() => {}),
             ]);
+
             const tags=(TAGS||'').split(/[\n,]/).map(s=>s.trim()).filter(Boolean);
             if(tags.length){
               let tagInput=page.locator('input[placeholder*="ハッシュタグ"]');
@@ -692,15 +729,18 @@ jobs:
               await tagInput.waitFor({ state: 'visible' });
               for(const t of tags){ await tagInput.click(); await tagInput.fill(t); await page.keyboard.press('Enter'); await page.waitForTimeout(120); }
             }
+
             const publishBtn = page.locator('button:has-text("投稿する")').first();
             await publishBtn.waitFor({ state: 'visible' });
             for (let i=0;i<20;i++){ if (await publishBtn.isEnabled()) break; await page.waitForTimeout(100); }
             await publishBtn.click({ force: true });
+
             await Promise.race([
               page.waitForURL(u => !/\/publish/i.test(typeof u === 'string' ? u : u.toString()), { timeout: 20000 }).catch(() => {}),
               page.locator('text=投稿しました').first().waitFor({ timeout: 8000 }).catch(() => {}),
               page.waitForTimeout(5000),
             ]);
+
             await page.screenshot({ path: SS_PATH, fullPage: true });
             const finalUrl=page.url();
             console.log('PUBLISHED_URL=' + finalUrl);
@@ -718,8 +758,9 @@ jobs:
           if [ -n "$url" ]; then echo "published_url=$url" >> $GITHUB_OUTPUT; fi
           if [ -n "$draft" ]; then echo "draft_url=$draft" >> $GITHUB_OUTPUT; fi
           if [ -n "$shot" ]; then echo "screenshot=$shot" >> $GITHUB_OUTPUT; fi
+
       - name: Upload screenshot (if any)
-        if: always(){{ steps.publish.outputs.screenshot != '' }}
+        if: ${{ steps.publish.outputs.screenshot != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: note-screenshot
