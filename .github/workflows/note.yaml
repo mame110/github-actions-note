@@ -672,8 +672,8 @@ jobs:
             page.setDefaultTimeout(180000);
 
             await page.goto(START_URL, { waitUntil: 'domcontentloaded' });
-            await page.waitForSelector('textarea[placeholder*="タイトル"]');
-            await page.fill('textarea[placeholder*="タイトル"]', TITLE);
+            await page.waitForSelector('textarea[placeholder*="記事タイトル"]');
+            await page.fill('textarea[placeholder*="記事タイトル"]', TITLE);
 
             const bodyBox = page.locator('div[contenteditable="true"][role="textbox"]').first();
             await bodyBox.waitFor({ state: 'visible' });
