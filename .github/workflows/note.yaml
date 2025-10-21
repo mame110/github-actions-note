@@ -666,117 +666,110 @@ jobs:
           const blocks = splitMarkdownBlocks(preBody);
 
           let browser, context, page;
-          try{
-            browser = await chromium.launch({ headless: true, args: ['--lang=ja-JP'] });
-            context = await browser.newContext({ storageState: STATE_PATH, locale: 'ja-JP' });
-            page = await context.newPage();
-            page.setDefaultTimeout(180000);
+          try{
+            browser = await chromium.launch({ headless: true, args: ['--lang=ja-JP'] });
+            context = await browser.newContext({ storageState: STATE_PATH, locale: 'ja-JP' });
+            page = await context.newPage();
+            page.setDefaultTimeout(180000);
 
-            await page.goto(START_URL, { waitUntil: 'domcontentloaded' });
-            await page.waitForSelector('textarea[placeholder*="記事タイトル"]');
-            await page.fill('textarea[placeholder*="記事タイトル"]', TITLE);
+            await page.goto(START_URL, { waitUntil: 'domcontentloaded' });
+            await page.waitForSelector('textarea[placeholder*="記事タイトル"]');
+            await page.fill('textarea[placeholder*="記事タイトル"]', TITLE);
 
-            const bodyBox = page.locator('div[contenteditable="true"][role="textbox"]').first();
-            await bodyBox.waitFor({ state: 'visible' });
-            const htmlAll = htmlFromMarkdown(preBody);
-            let pasted = false;
-            try {
-              const origin = new URL(START_URL).origin;
-              await context.grantPermissions(['clipboard-read','clipboard-write'], { origin });
-              await page.evaluate(async (html, plain) => {
-                const item = new ClipboardItem({
-                  'text/html': new Blob([html], { type: 'text/html' }),
-                  'text/plain': new Blob([plain], { type: 'text/plain' }),
-                });
-                await navigator.clipboard.write([item]);
-              }, htmlAll, preBody);
-              await bodyBox.click();
-              await page.keyboard.press('Control+V');
-              await page.waitForTimeout(200);
-              pasted = true;
-            } catch (e) {
-              // クリップボード権限が無い場合のフォールバック
-            }
-            if (!pasted) {
-              // 一括HTML挿入フォールバック
-              await insertHTML(page, bodyBox, htmlAll);
-              await page.waitForTimeout(100);
-            }
+            const bodyBox = page.locator('div[contenteditable="true"][role="textbox"]').first();
+            await bodyBox.waitFor({ state: 'visible' });
+            const htmlAll = htmlFromMarkdown(preBody);
+            let pasted = false;
+            try {
+              const origin = new URL(START_URL).origin;
+              await context.grantPermissions(['clipboard-read','clipboard-write'], { origin });
+              await page.evaluate(async (html, plain) => {
+                const item = new ClipboardItem({
+                  'text/html': new Blob([html], { type: 'text/html' }),
+                  'text/plain': new Blob([plain], { type: 'text/plain' }),
+                });
+                await navigator.clipboard.write([item]);
+              }, htmlAll, preBody);
+              await bodyBox.click();
+              await page.keyboard.press('Control+V');
+              await page.waitForTimeout(200);
+              pasted = true;
+            } catch (e) {
+              
+            }
+            if (!pasted) {
+              
+              await insertHTML(page, bodyBox, htmlAll);
+              await page.waitForTimeout(100);
+            }
 
-            if(!IS_PUBLIC){
-              const saveBtn = page.locator('button:has-text("下書き保存"), [aria-label*="下書き保存"]').first();
-              await saveBtn.waitFor({ state: 'visible' });
-              if(await saveBtn.isEnabled()) { await saveBtn.click(); await page.locator('text=保存しました').waitFor({ timeout: 4000 }).catch(()=>{}); }
-              // await page.screenshot({ path: SS_PATH, fullPage: true });
-              console.log('DRAFT_URL=' + page.url());
-              // console.log('SCREENSHOT=' + SS_PATH);
-              return;
-            }
+            if(!IS_PUBLIC){
+              const saveBtn = page.locator('button:has-text("下書き保存"), [aria-label*="下書き保存"]').first();
+              await saveBtn.waitFor({ state: 'visible' });
+              if(await saveBtn.isEnabled()) { await saveBtn.click(); await page.locator('text=保存しました').waitFor({ timeout: 4000 }).catch(()=>{}); }
+              console.log('DRAFT_URL=' + page.url());
+              return;
+            }
 
-            const proceed = page.locator('button:has-text("公開に進む")').first();
-            await proceed.waitFor({ state: 'visible' });
-            for (let i=0;i<20;i++){ if (await proceed.isEnabled()) break; await page.waitForTimeout(100); }
-            await proceed.click({ force: true });
+            const proceed = page.locator('button:has-text("公開に進む")').first();
+            await proceed.waitFor({ state: 'visible' });
+            for (let i=0;i<20;i++){ if (await proceed.isEnabled()) break; await page.waitForTimeout(100); }
+            await proceed.click({ force: true });
 
-            await Promise.race([
-              page.waitForURL(/\/publish/i).catch(() => {}),
-              page.locator('button:has-text("投稿する")').first().waitFor({ state: 'visible' }).catch(() => {}),
-            ]);
+            await Promise.race([
+              page.waitForURL(/\/publish/i).catch(() => {}),
+              page.locator('button:has-text("投稿する")').first().waitFor({ state: 'visible' }).catch(() => {}),
+            ]);
 
-            const tags=(TAGS||'').split(/[\n,]/).map(s=>s.trim()).filter(Boolean);
-            if(tags.length){
-              let tagInput=page.locator('input[placeholder*="ハッシュタグ"]');
-              if(!(await tagInput.count())) tagInput=page.locator('input[role="combobox"]').first();
-              await tagInput.waitFor({ state: 'visible' });
-              for(const t of tags){ await tagInput.click(); await tagInput.fill(t); await page.keyboard.press('Enter'); await page.waitForTimeout(120); }
-            }
+            const tags=(TAGS||'').split(/[\n,]/).map(s=>s.trim()).filter(Boolean);
+            if(tags.length){
+              let tagInput=page.locator('input[placeholder*="ハッシュタグ"]');
+              if(!(await tagInput.count())) tagInput=page.locator('input[role="combobox"]').first();
+              await tagInput.waitFor({ state: 'visible' });
+              for(const t of tags){ await tagInput.click(); await tagInput.fill(t); await page.keyboard.press('Enter'); await page.waitForTimeout(120); }
+            }
 
-            const publishBtn = page.locator('button:has-text("投稿する")').first();
-            await publishBtn.waitFor({ state: 'visible' });
-            for (let i=0;i<20;i++){ if (await publishBtn.isEnabled()) break; await page.waitForTimeout(100); }
-            await publishBtn.click({ force: true });
+            const publishBtn = page.locator('button:has-text("投稿する")').first();
+            await publishBtn.waitFor({ state: 'visible' });
+            for (let i=0;i<20;i++){ if (await publishBtn.isEnabled()) break; await page.waitForTimeout(100); }
+            await publishBtn.click({ force: true });
 
-            await Promise.race([
-              page.waitForURL(u => !/\/publish/i.test(typeof u === 'string' ? u : u.toString()), { timeout: 20000 }).catch(() => {}),
-              page.locator('text=投稿しました').first().waitFor({ timeout: 8000 }).catch(() => {}),
-              page.waitForTimeout(5000),
-            ]);
+            await Promise.race([
+              page.waitForURL(u => !/\/publish/i.test(typeof u === 'string' ? u : u.toString()), { timeout: 20000 }).catch(() => {}),
+              page.locator('text=投稿しました').first().waitFor({ timeout: 8000 }).catch(() => {}),
+              page.waitForTimeout(5000),
+            ]);
 
-            // ... tryブロックの最後 ...
-            // await page.screenshot(...);  // 👈 tryの中は消す！
-            // console.log('SCREENSHOT=...'); // 👈 tryの中は消す！
-          } catch (error) { // 👈 catch も忘れずに！
+            const finalUrl=page.url();
+            console.log('PUBLISHED_URL=' + finalUrl);
+          } catch (error) {
             console.error('Playwright script failed:', error.message);
             throw error;
           } finally {
-            // ⬇️ 💖ここにお引っ越し！💖 ⬇️
             try {
               if (page) {
                 console.log(`Taking final screenshot: ${SS_PATH}`);
                 await page.screenshot({ path: SS_PATH, fullPage: true });
+              } else {
+                console.log('Page object not available, skipping screenshot.');
               }
             } catch (ssError) {
               console.error('Failed to take screenshot:', ssError.message);
             }
             console.log('SCREENSHOT=' + SS_PATH);
-            // ⬆️ 💖ここまで💖 ⬆️
-
-            try{ await page?.close(); }catch{} // 👈 ブラウザを閉じるのはその後！
+            try{ await page?.close(); }catch{}
             try{ await context?.close(); }catch{}
             try{ await browser?.close(); }catch{}
           }
           EOF
-          node post.mjs | tee post.log
-          SCRIPT_EXIT_CODE=${PIPESTATUS[0]} # 👈 💖 1. この1行を追加！
+          node post.mjs | tee post.log
+          url=$(grep '^PUBLISHED_URL=' post.log | tail -n1 | cut -d'=' -f2-)
+          draft=$(grep '^DRAFT_URL=' post.log | tail -n1 | cut -d'=' -f2-)
+          shot=$(grep '^SCREENSHOT=' post.log | tail -n1 | cut -d'=' -f2-)
+          if [ -n "$url" ]; then echo "published_url=$url" >> $GITHUB_OUTPUT; fi
+          if [ -n "$draft" ]; then echo "draft_url=$draft" >> $GITHUB_OUTPUT; fi
+          if [ -n "$shot" ]; then echo "screenshot=$shot" >> $GITHUB_OUTPUT; fi
 
-          url=$(grep '^PUBLISHED_URL=' post.log | tail -n1 | cut -d'=' -f2-)
-          draft=$(grep '^DRAFT_URL=' post.log | tail -n1 | cut -d'=' -f2-)
-          shot=$(grep '^SCREENSHOT=' post.log | tail -n1 | cut -d'=' -f2-)
-          if [ -n "$url" ]; then echo "published_url=$url" >> $GITHUB_OUTPUT; fi
-          if [ -n "$draft" ]; then echo "draft_url=$draft" >> $GITHUB_OUTPUT; fi
-          if [ -n "$shot" ]; then echo "screenshot=$shot" >> $GITHUB_OUTPUT; fi
-
-          exit $SCRIPT_EXIT_CODE
       - name: Upload screenshot (if any)
         if: always() && steps.publish.outputs.screenshot != ''
         uses: actions/upload-artifact@v4
