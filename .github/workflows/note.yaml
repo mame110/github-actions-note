@@ -492,6 +492,7 @@ jobs:
 
       - name: Publish via Playwright (draft or public)
         id: publish
+        continue-on-error: true
         env:
           TITLE: ${{ steps.draft.outputs.TITLE }}
           TAGS: ${{ steps.draft.outputs.TAGS }}
@@ -760,7 +761,7 @@ jobs:
           if [ -n "$shot" ]; then echo "screenshot=$shot" >> $GITHUB_OUTPUT; fi
 
       - name: Upload screenshot (if any)
-        if: ${{ steps.publish.outputs.screenshot != '' }}
+        if: always() && steps.publish.outputs.screenshot != ''
         uses: actions/upload-artifact@v4
         with:
           name: note-screenshot
