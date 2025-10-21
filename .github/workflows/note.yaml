@@ -1,3 +1,5 @@
+name: Note Workflow (Gemini Ver.)
+
 on:
   workflow_dispatch:
     inputs:
