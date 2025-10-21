@@ -350,7 +350,7 @@ async function proposeQueries(body){
 }
 
 async function tavilySearch(q){
-  const res = await fetch('[https://api.tavily.com/search](https://api.tavily.com/search)', {
+  const res = await fetch('https://api.tavily.com/search', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ api_key: TAVILY_API_KEY, query: q, search_depth: 'advanced', max_results: 5, include_answer: true })
   });
