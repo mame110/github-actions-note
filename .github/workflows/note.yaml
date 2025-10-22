@@ -443,97 +443,65 @@ jobs:
     name: Post to note.com (Playwright)
     needs: factcheck
     if: ${{ github.event.inputs.dry_run != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, windows, note]
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: powershell
     env:
       IS_PUBLIC: ${{ github.event.inputs.is_public }}
       STATE_JSON: ${{ secrets.NOTE_STORAGE_STATE_JSON }}
       START_URL: https://editor.note.com/new
-    outputs:
-      final_url: ${{ steps.publish.outputs.published_url || steps.publish.outputs.draft_url }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Show outbound IP
-        shell: powershell
-        run: '(Invoke-RestMethod https://api.ipify.org).ToString() | Write-Output'
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      # 外向きIPを記録（自宅IPで走ってるかの監査）
+      - name: Show outbound IP
+        run: '(Invoke-RestMethod https://api.ipify.org).ToString() | Write-Output'
 
       - name: Install Playwright
         run: |
           npm init -y
           npm i playwright marked
-          npx playwright install --with-deps chromium | cat
+          npx playwright install chromium
 
       - name: Prepare storageState
         id: state
         run: |
-          test -n "$STATE_JSON" || (echo "ERROR: NOTE_STORAGE_STATE_JSON secret is not set" && exit 1)
-          mkdir -p "$RUNNER_TEMP"
-          echo "$STATE_JSON" > "$RUNNER_TEMP/note-state.json"
-          echo "STATE_PATH=$RUNNER_TEMP/note-state.json" >> $GITHUB_OUTPUT
-
-      - name: Ensure jq (post)
-        run: |
-          if ! command -v jq >/dev/null 2>&1; then
-            sudo apt-get update -y
-            sudo apt-get install -y jq
-          fi
+          if (-not $env:STATE_JSON) { Write-Error "NOTE_STORAGE_STATE_JSON secret is not set"; exit 1 }
+          $tmp = "$env:RUNNER_TEMP\note-state.json"
+          Set-Content -LiteralPath $tmp -Value $env:STATE_JSON -NoNewline
+          "STATE_PATH=$tmp" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Restore final
         id: draft
         env:
           FINAL_B64: ${{ needs.factcheck.outputs.final_b64 }}
         run: |
-          test -n "$FINAL_B64" || { echo "final_b64 output is empty"; exit 1; }
-          echo "$FINAL_B64" | base64 -d > final.json || echo "$FINAL_B64" | base64 --decode > final.json
-          echo "TITLE=$(jq -r .title final.json)" >> $GITHUB_OUTPUT
-          echo "TAGS=$(jq -r '.tags | join(", ")' final.json)" >> $GITHUB_OUTPUT
+          if (-not $env:FINAL_B64) { Write-Error "final_b64 output is empty"; exit 1 }
+          $bytes = [Convert]::FromBase64String($env:FINAL_B64)
+          [IO.File]::WriteAllBytes("final.json", $bytes)
+          $title = (Get-Content final.json -Raw | ConvertFrom-Json).title
+          $tags  = (Get-Content final.json -Raw | ConvertFrom-Json).tags -join ", "
+          "TITLE=$title" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "TAGS=$tags"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Publish via Playwright (draft or public)
         id: publish
-        continue-on-error: true
-        shell: powershell
         env:
           TITLE: ${{ steps.draft.outputs.TITLE }}
-          TAGS: ${{ steps.draft.outputs.TAGS }}
+          TAGS:  ${{ steps.draft.outputs.TAGS }}
           STATE_PATH: ${{ steps.state.outputs.STATE_PATH }}
+          START_URL: ${{ env.START_URL }}
+          IS_PUBLIC: ${{ env.IS_PUBLIC }}
         run: |
-          $ErrorActionPreference = 'Continue'
-          node post.mjs | tee -FilePath post.log
-          $exit_code = $LASTEXITCODE
+          node post.mjs | Tee-Object -FilePath post.log
 
-          if (Test-Path post.log) {
-            $logLines = Get-Content post.log
-
-            $publishedMatch = ($logLines | Select-String '^PUBLISHED_URL=' | Select-Object -Last 1)
-            if ($publishedMatch) {
-              $line = $publishedMatch.Line
-              $value = $line.Substring($line.IndexOf('=') + 1)
-              "published_url=$value" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            }
-
-            $draftMatch = ($logLines | Select-String '^DRAFT_URL=' | Select-Object -Last 1)
-            if ($draftMatch) {
-              $line = $draftMatch.Line
-              $value = $line.Substring($line.IndexOf('=') + 1)
-              "draft_url=$value" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            }
-
-            $screenshotMatch = ($logLines | Select-String '^SCREENSHOT=' | Select-Object -Last 1)
-            if ($screenshotMatch) {
-              $line = $screenshotMatch.Line
-              $value = $line.Substring($line.IndexOf('=') + 1)
-              "screenshot=$value" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            }
-          }
-
-          exit $exit_code
-
+      # 失敗でも必ず証跡を回収
       - name: Upload debug artifacts (always)
         if: always()
         uses: actions/upload-artifact@v4
