@@ -6,26 +6,18 @@ jobs:
     runs-on: [self-hosted, Windows, X64]
     defaults:
       run:
-        shell: powershell
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {0}
     steps:
       - name: Runner / IP check (resilient)
         run: |
           Write-Host "Machine: $env:COMPUTERNAME"
           Write-Host "User:    $env:USERNAME"
           Write-Host "PS:      $($PSVersionTable.PSVersion)"
-          # TLSを強制（古い既定で弾かれる対策）
           try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13 } catch {}
           $ProgressPreference = 'SilentlyContinue'
-
           $ip4 = $null
           try { $ip4 = (Invoke-RestMethod -Uri 'https://api.ipify.org' -TimeoutSec 10 -ErrorAction Stop) } catch {}
-          if (-not $ip4) {
-            try { $ip4 = (Invoke-WebRequest -Uri 'https://api.ipify.org' -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop).Content } catch {}
-          }
-          if (-not $ip4) {
-            try { $ip4 = (curl.exe -s https://api.ipify.org) } catch {}
-          }
+          if (-not $ip4) { try { $ip4 = (Invoke-WebRequest -Uri 'https://api.ipify.org' -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop).Content } catch {} }
+          if (-not $ip4) { try { $ip4 = (curl.exe -s https://api.ipify.org) } catch {} }
           Write-Host "Outbound IPv4: $ip4"
-
-          # ここでエラーにしない（ネットワーク不安定でもGREENで通す）
           exit 0
