@@ -550,6 +550,22 @@ jobs:
             }
           }
 
+          async function logPageState(tag='error'){
+            if(!page){
+              console.warn(`No page available to log state for ${tag}`);
+              return;
+            }
+            try{
+              const currentUrl=page.url();
+              console.log(`PAGE_URL[${tag}]=${currentUrl}`);
+              const html=await page.content();
+              const snippet=String(html||'').slice(0,2000);
+              console.log(`PAGE_HTML_SNIPPET[${tag}]=${snippet}`);
+            }catch(error){
+              console.error('Failed to log page state:', error);
+            }
+          }
+
           async function cleanup(){
             if(cleaned) return;
             cleaned=true;
@@ -560,14 +576,20 @@ jobs:
 
           process.on('uncaughtException', (error) => {
             console.error('uncaughtException', error);
-            snap('uncaught').catch(() => {}).finally(() => {
+            (async () => {
+              await logPageState('uncaught').catch(() => {});
+              await snap('uncaught').catch(() => {});
+            })().finally(() => {
               cleanup().finally(() => process.exit(1));
             });
           });
 
           process.on('unhandledRejection', (reason) => {
             console.error('unhandledRejection', reason);
-            snap('unhandled').catch(() => {}).finally(() => {
+            (async () => {
+              await logPageState('unhandled').catch(() => {});
+              await snap('unhandled').catch(() => {});
+            })().finally(() => {
               cleanup().finally(() => process.exit(1));
             });
           });
@@ -836,6 +858,7 @@ jobs:
               const finalUrl=page.url();
               console.log('PUBLISHED_URL=' + finalUrl);
             }catch(error){
+              try{ await logPageState('run-error'); }catch{}
               try{ await snap('error'); }catch{}
               throw error;
             }finally{
