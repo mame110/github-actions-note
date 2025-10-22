@@ -1,0 +1,15 @@
+# .github/workflows/selfhost-test.yml （github-actions-note リポに作成）
+name: Self-hosted quick test
+on: workflow_dispatch
+jobs:
+  ping:
+    runs-on: [self-hosted, Windows, X64]   # ← 現在のRunnerの実ラベルに合わせる
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Runner / IP check
+        run: |
+          Write-Host "Machine: $env:COMPUTERNAME"
+          $ip4 = (Invoke-RestMethod https://api.ipify.org).ToString()
+          Write-Host "Outbound IPv4: $ip4"
