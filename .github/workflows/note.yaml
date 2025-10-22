@@ -443,11 +443,11 @@ jobs:
     name: Post to note.com (Playwright)
     needs: factcheck
     if: ${{ github.event.inputs.dry_run != 'true' }}
-    runs-on: [self-hosted, windows, note]
+    runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 30
     defaults:
       run:
-        shell: powershell
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {0}
     env:
       IS_PUBLIC: ${{ github.event.inputs.is_public }}
       STATE_JSON: ${{ secrets.NOTE_STORAGE_STATE_JSON }}
@@ -459,7 +459,6 @@ jobs:
         with:
           node-version: '20'
 
-      # 外向きIPを記録（自宅IPで走ってるかの監査）
       - name: Show outbound IP
         run: '(Invoke-RestMethod https://api.ipify.org).ToString() | Write-Output'
 
@@ -501,14 +500,13 @@ jobs:
         run: |
           node post.mjs | Tee-Object -FilePath post.log
 
-      # 失敗でも必ず証跡を回収
       - name: Upload debug artifacts (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: note-debug-artifacts
-          path: |
-            network.har
-            trace.zip
-            post.log
-            **/*.png
+          path:
+            - network.har
+            - trace.zip
+            - post.log
+            - **/*.png
