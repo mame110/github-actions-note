@@ -37,9 +37,7 @@ on:
         required: true
         default: 'false'
         type: choice
-        options:
-          - 'true'
-          - 'false'
+        options: ['true','false']
 
 permissions:
   contents: read
