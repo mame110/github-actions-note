@@ -423,25 +423,20 @@ jobs:
     name: Post to note.com (Playwright)
     needs: factcheck
     if: ${{ github.event.inputs.dry_run != 'true' }}
-    # ✅ Windows の self-hosted Runner で実行
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 30
     defaults:
       run:
-        # ✅ PowerShell を既定シェルに
         shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {0}
     env:
       IS_PUBLIC: ${{ github.event.inputs.is_public }}
       STATE_JSON: ${{ secrets.NOTE_STORAGE_STATE_JSON }}
       START_URL: https://editor.note.com/new
-    outputs:
-      final_url: ${{ steps.publish.outputs.published_url || steps.publish.outputs.draft_url }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
 
@@ -449,7 +444,6 @@ jobs:
         run: |
           npm init -y
           npm i playwright marked
-          # ✅ Windows では --with-deps は不要
           npx playwright install chromium
 
       - name: Prepare storageState
@@ -457,9 +451,10 @@ jobs:
         run: |
           if (-not $env:STATE_JSON) { Write-Error "NOTE_STORAGE_STATE_JSON secret is not set"; exit 1 }
           $tmp = "$env:RUNNER_TEMP\note-state.json"
-          Set-Content -LiteralPath $tmp -Value $env:STATE_JSON -NoNewline
+          Set-Content -LiteralPath $tmp -Value $env:STATE_JSON -NoNewline -Encoding utf8
           "STATE_PATH=$tmp" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
+      # ★UTF-8で確実に読む（文字化け対策）
       - name: Restore final
         id: draft
         env:
@@ -468,13 +463,13 @@ jobs:
           if (-not $env:FINAL_B64) { Write-Error "final_b64 output is empty"; exit 1 }
           $bytes = [Convert]::FromBase64String($env:FINAL_B64)
           [IO.File]::WriteAllBytes("final.json", $bytes)
-          $json = Get-Content final.json -Raw | ConvertFrom-Json
-          "TITLE=$($json.title)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "TAGS=$($json.tags -join ', ')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+          $jsonText = Get-Content -LiteralPath "final.json" -Raw -Encoding UTF8
+          $obj = $jsonText | ConvertFrom-Json
+          "TITLE=$($obj.title)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "TAGS=$([string]::Join(', ', $obj.tags))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Publish via Playwright (draft or public)
-        id: publish
-        continue-on-error: true
         env:
           TITLE: ${{ steps.draft.outputs.TITLE }}
           TAGS:  ${{ steps.draft.outputs.TAGS }}
@@ -484,16 +479,28 @@ jobs:
         run: |
           node post.mjs | Tee-Object -FilePath post.log
 
+      # ★ログからURLとスクショパスを拾って出力（Windows版）
+      - name: Parse post outputs
+        id: parse
+        if: always()
+        run: |
+          if (Test-Path -LiteralPath "post.log") {
+            $txt = Get-Content -LiteralPath "post.log" -Raw -Encoding UTF8
+            if ($txt -match "PUBLISHED_URL=(.+)") { "published_url=$($matches[1].Trim())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
+            if ($txt -match "DRAFT_URL=(.+)")     { "draft_url=$($matches[1].Trim())"     | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
+            if ($txt -match "SCREENSHOT=(.+)")    { "screenshot=$($matches[1].Trim())"    | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
+          }
+
+      # ★Linuxの /tmp をやめて、実際に得たスクショパスを使う
       - name: Upload note screenshot
-        if: ${{ always() }}
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          # post.mjs は os.tmpdir() を使う → Windows では %TEMP%
-          path: "${{ runner.temp }}\\note-screenshots\\*.png"
           name: note-screenshot
+          path: ${{ steps.parse.outputs.screenshot }}
 
       - name: Upload post log
-        if: ${{ always() }}
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: post-log
