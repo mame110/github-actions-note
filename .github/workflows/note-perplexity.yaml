@@ -1,4 +1,4 @@
-name: Note Workflow (Perplexity)
+name: Note Workflow (Gemini Ver.)
 
 on:
   workflow_dispatch:
@@ -49,11 +49,11 @@ env:
 
 jobs:
   research:
-    name: Research (Perplexity Search API)
+    name: Research (Gemini + Tavily)
     runs-on: ubuntu-latest
     env:
-      PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+      TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
       THEME: ${{ github.event.inputs.theme }}
       TARGET: ${{ github.event.inputs.target }}
     outputs:
@@ -67,148 +67,79 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
+      - name: Install AI SDK
         run: |
           npm init -y
-          npm i @perplexity-ai/perplexity_ai ai @ai-sdk/anthropic
+          npm i ai @ai-sdk/google # ★★★ここを @ai-sdk/google に修正！★★★
 
-      - name: Research with Perplexity API
+      - name: Research with Gemini + Tavily
         run: |
           cat > research.mjs <<'EOF'
-          import Perplexity from '@perplexity-ai/perplexity_ai';
           import { generateText } from 'ai';
-          import { anthropic } from '@ai-sdk/anthropic';
+          import { google } from '@ai-sdk/google'; // ★★★ここを @ai-sdk/google に修正！★★★
           import fs from 'fs';
-
           const theme = process.env.THEME || '';
           const target = process.env.TARGET || '';
           const today = new Date().toISOString().slice(0,10);
           const artifactsDir = '.note-artifacts';
           fs.mkdirSync(artifactsDir, { recursive: true });
+          const TAVILY_API_KEY = process.env.TAVILY_API_KEY || '';
+          const modelName = 'gemini-2.0-flash-lite';
+          
+          if (!TAVILY_API_KEY) { console.error('TAVILY_API_KEY is not set'); process.exit(1); }
 
-          // Perplexity APIクライアント初期化
-          const perplexity = new Perplexity({
-            apiKey: process.env.PERPLEXITY_API_KEY
-          });
-
-          async function main() {
-            try {
-              // 複数の検索クエリを実行
-              const queries = [
-                `${theme} 最新情報 ${today}`,
-                `${theme} トレンド 動向`,
-                `${theme} 事例 実践`,
-                `${theme} 課題 解決策`,
-                `${theme} 将来 展望`
-              ];
-
-              console.log('Perplexity検索を開始...');
-              const searchResults = [];
-
-              for (const query of queries) {
-                console.log(`検索中: ${query}`);
-                const search = await perplexity.search.create({
-                  query: query,
-                  maxResults: 5,
-                  maxTokensPerPage: 2048,
-                  country: 'JP'
-                });
-                searchResults.push({ query, results: search.results });
+          async function tavilySearch(q) {
+            const res = await fetch('https://api.tavily.com/search', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ api_key: TAVILY_API_KEY, query: q, search_depth: 'advanced', max_results: 7, include_answer: true })
+            });
+            if (!res.ok) { return { query: q, results: [], answer: null }; }
+            const json = await res.json().catch(() => ({}));
+            return { query: q, results: Array.isArray(json.results) ? json.results : [], answer: json.answer || null };
+          }
+          
+          function formatEvidence(items) {
+            const lines = [];
+            for (const it of items) {
+              lines.push(`### 検索クエリ: ${it.query}`);
+              if (it.answer) { lines.push(`Tavilyの回答: ${it.answer}`); }
+              for (const r of it.results || []) {
+                const t = (r.title || '').toString();
+                const u = (r.url || '').toString();
+                const c = (r.content || '').toString().slice(0, 500);
+                lines.push(`- [${t}](${u})\n  ${c}`);
               }
-
-              // 検索結果をMarkdown形式でフォーマット
-              let researchMd = `# リサーチレポート: ${theme}\n\n`;
-              researchMd += `**作成日**: ${today}\n`;
-              researchMd += `**対象読者**: ${target}\n\n`;
-              researchMd += `---\n\n`;
-
-              for (const { query, results } of searchResults) {
-                researchMd += `## ${query}\n\n`;
-                
-                if (Array.isArray(results) && results.length > 0) {
-                  for (const result of results) {
-                    researchMd += `### ${result.title}\n\n`;
-                    researchMd += `**URL**: [${result.url}](${result.url})\n\n`;
-                    if (result.date) {
-                      researchMd += `**日付**: ${result.date}\n\n`;
-                    }
-                    if (result.snippet) {
-                      researchMd += `${result.snippet}\n\n`;
-                    }
-                    researchMd += `---\n\n`;
-                  }
-                } else {
-                  researchMd += `検索結果なし\n\n`;
-                }
-              }
-
-              // Claudeで検索結果を要約・構造化
-              console.log('Claudeで検索結果を分析・構造化中...');
-              const modelName = 'claude-sonnet-4-20250514';
-              const systemPrompt = [
-                'あなたは最新情報の分析と構造化に特化した超一流のリサーチャーです。',
-                '提供された検索結果を基に、事実ベースで信頼性の高いリサーチレポートを作成してください。',
-                '出典は本文内にMarkdownリンクで必ず埋め込むこと。',
-                '十分な分量（目安: 2,000語以上）で、各節に適切な見出しと構造を持たせてください。',
-                '一次情報（公的機関・規格・論文・公式発表）を優先し、情報源を明記してください。'
-              ].join('\n');
-
-              const userPrompt = [
-                `以下の検索結果を基に、テーマ「${theme}」に関する包括的なリサーチレポートを作成してください。`,
-                ``,
-                `**対象読者**: ${target}`,
-                `**現在日付**: ${today}`,
-                ``,
-                `## 検索結果`,
-                ``,
-                researchMd,
-                ``,
-                `## 要件`,
-                ``,
-                `1. 検索結果から重要な情報を抽出し、論理的に構造化する`,
-                `2. 各主張には必ず出典のMarkdownリンクを埋め込む`,
-                `3. 最新のトレンド、具体的な事例、課題と解決策、将来展望を含める`,
-                `4. 対象読者(${target})に分かりやすく説明する`,
-                `5. 情報の信頼性を評価し、一次情報を優先する`,
-                ``,
-                `**重要**: 途中経過や確認質問は一切せず、最終レポートのみを返してください。`
-              ].join('\n');
-
-              const { text } = await generateText({
-                model: anthropic(modelName),
-                system: systemPrompt,
-                prompt: userPrompt,
-                temperature: 0.3,
-                maxTokens: 30000
-              });
-
-              const finalReport = text || researchMd;
-
-              // 保存
-              fs.writeFileSync(`${artifactsDir}/research.md`, finalReport);
-              
-              // トレース用に生データも保存
-              const traceData = {
-                theme,
-                target,
-                date: today,
-                queries,
-                searchResults,
-                finalReport: finalReport.substring(0, 500) + '...'
-              };
-              fs.writeFileSync(`${artifactsDir}/research_trace.json`, JSON.stringify(traceData, null, 2));
-
-              console.log('リサーチ完了！');
-
-            } catch (error) {
-              console.error('エラー:', error);
-              // エラー時は検索結果のみを保存
-              const fallbackReport = `# リサーチレポート: ${theme}\n\n**エラーが発生しました**: ${error.message}\n\n検索は部分的に完了している可能性があります。`;
-              fs.writeFileSync(`${artifactsDir}/research.md`, fallbackReport);
-              throw error;
+              lines.push('');
             }
+            return lines.join('\n');
           }
 
+          async function main() {
+            const searchQuery = `「${theme}」について、ターゲット「${target}」向けの最新情報。一次情報（公的機関・規格・論文・公式）を優先して検索。`;
+            const searchResult = await tavilySearch(searchQuery);
+            const evidence = formatEvidence([searchResult]);
+            
+            const sys = [
+              'あなたは最新情報の収集と要約に特化した超一流のリサーチャーです。',
+              '提供された検索結果（エビデンス）に基づき、事実ベースでレポートを作成してください。',
+              '本文内にMarkdownリンクで出典を必ず埋め込むこと。',
+              '十分な分量（目安: 2,000語以上）で、章立てして詳細に記述してください。',
+            ].join('\n');
+            const userPrompt = `以下のテーマ、ターゲット、エビデンスに基づき、最終版のリサーチレポートを作成してください。\n【重要】途中経過や確認質問は一切せず、最終レポートのみを返してください。\n---\nテーマ: ${theme}\nターゲット: ${target}\n現在日付: ${today}\n\n## エビデンス（Tavily検索結果）\n${evidence}`;
+            
+            const { text } = await generateText({
+              model: google(modelName), // ★★★ここを google() に修正！★★★
+              system: sys,
+              prompt: userPrompt,
+              temperature: 0.5,
+              maxTokens: 8000,
+            });
+            
+            const assistantTexts = text || '';
+            fs.writeFileSync(`${artifactsDir}/research.md`, assistantTexts);
+            try { fs.writeFileSync(`${artifactsDir}/research_trace.json`, JSON.stringify({ searchResult, report: assistantTexts }, null, 2)); } catch {}
+          }
+          
           await main();
           EOF
           node research.mjs
@@ -230,11 +161,11 @@ jobs:
             .note-artifacts/research_trace.json
 
   write:
-    name: Write (Claude Sonnet 4.0)
+    name: Write (Gemini)
     needs: research
     runs-on: ubuntu-latest
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
       THEME: ${{ github.event.inputs.theme }}
       TARGET: ${{ github.event.inputs.target }}
       MESSAGE: ${{ github.event.inputs.message }}
@@ -255,7 +186,7 @@ jobs:
       - name: Install AI SDK
         run: |
           npm init -y
-          npm i ai @ai-sdk/anthropic
+          npm i ai @ai-sdk/google # ★★★ここを @ai-sdk/google に修正！★★★
 
       - name: Restore research
         env:
@@ -268,17 +199,29 @@ jobs:
         run: |
           cat > write.mjs <<'EOF'
           import { generateText } from 'ai';
-          import { anthropic } from '@ai-sdk/anthropic';
+          import { google } from '@ai-sdk/google'; // ★★★ここを @ai-sdk/google に修正！★★★
           import fs from 'fs';
           const theme=process.env.THEME||''; const target=process.env.TARGET||''; const message=process.env.MESSAGE||''; const cta=process.env.CTA||'';
           const inputTags=(process.env.INPUT_TAGS||'').split(',').map(s=>s.trim()).filter(Boolean);
           const researchReport=fs.readFileSync('.note-artifacts/research.md','utf8');
-          const modelName='claude-sonnet-4-20250514';
+          const modelName = 'gemini-2.0-flash-lite';
           function extractJsonFlexible(raw){const t=(raw||'').trim().replace(/\u200B/g,'');try{return JSON.parse(t);}catch{}const m=t.match(/```[a-zA-Z]*\s*([\s\S]*?)\s*```/);if(m&&m[1]){try{return JSON.parse(m[1].trim());}catch{}}const f=t.indexOf('{'),l=t.lastIndexOf('}');if(f!==-1&&l!==-1&&l>f){const c=t.slice(f,l+1);try{return JSON.parse(c);}catch{}}return null;}
-          async function repairJson(raw){const sys='入力から {"title":string,"draftBody":string,"tags":string[]} のJSONのみ返答。';const {text}=await generateText({model:anthropic(modelName),system:sys,prompt:String(raw),temperature:0,maxTokens:8000});return extractJsonFlexible(text||'');}
+          
+          async function repairJson(raw){
+            const sys='あなたはJSON整形アシスタントです。入力されたテキストから、{"title":string,"draftBody":string,"tags":string[]} の形式でJSONオブジェクトを抽出または生成し、JSON文字列のみを返してください。JSON以外のテキストは一切含めないでください。';
+            const {text}=await generateText({
+              model: google(modelName), // ★★★ここを google() に修正！★★★
+              system:sys,
+              prompt:String(raw),
+              temperature:0,
+              maxTokens:8000,
+              // responseFormat: { type: 'json' }, // ★Gemini ProはJSONモードをサポートしてないことがあるので、いったんコメントアウト
+            });
+            return extractJsonFlexible(text||'');
+          }
+          
           function sanitizeTitle(t){
             let s=String(t||'').trim();
-            // フェンスや見出し、引用符を除去
             s=s.replace(/^```[a-zA-Z0-9_-]*\s*$/,'').replace(/^```$/,'');
             s=s.replace(/^#+\s*/,'');
             s=s.replace(/^"+|"+$/g,'').replace(/^'+|'+$/g,'');
@@ -292,9 +235,26 @@ jobs:
             const firstReal=lines.find(l=>!/^```/.test(l))||lines[0]||'';
             return sanitizeTitle(firstReal);
           }
-          const sysWrite='note.com向け長文記事の生成。JSON {title,draftBody,tags[]} で返答。draftBodyは6000〜9000文字を目安に十分な分量で、章ごとに小見出しと箇条書きを適切に含めること。';
-          const prompt=[`{テーマ}: ${theme}`,`{ペルソナ}: ${target}`,`{リサーチ内容}: ${researchReport}`,`{伝えたいこと}: ${message}`,`{読後のアクション}: ${cta}`].join('\n');
-          const {text}=await generateText({model:anthropic(modelName),system:sysWrite,prompt,temperature:0.7,maxTokens:30000});
+          
+          const sysWrite='あなたはnote.comに投稿するためのプロのライターです。長文の魅力的な記事を生成してください。\n必ず {"title":"記事タイトル","draftBody":"Markdown形式の記事本文","tags":["タグ1","タグ2"]} という厳密なJSON形式で返答してください。JSON以外のテキストは絶対に含めないでください。\ndraftBodyは6000〜9000文字を目安に十分な分量で、読者を惹きつける導入、具体的な内容（章ごとにH2（##）やH3（###）の小見出しと箇条書きを適切に含めること）、そして読後のアクション（CTA）に繋がる明確な結論を含めてください。';
+          const prompt=[
+            "以下の要件とリサーチ内容に基づき、note.com用の記事をJSON形式で生成してください。",
+            `{テーマ}: ${theme}`,
+            `{ペルソナ（読者）}: ${target}`,
+            `{リサーチ内容}: ${researchReport}`,
+            `{記事で伝えたい核メッセージ}: ${message}`,
+            `{読後のアクション(CTA)}: ${cta}`
+          ].join('\n');
+          
+          const {text}=await generateText({
+            model: google(modelName), // ★★★ここを google() に修正！★★★
+            system:sysWrite,
+            prompt,
+            temperature:0.7,
+            maxTokens:30000,
+            // responseFormat: { type: 'json' }, // ★Gemini ProはJSONモードをサポートしてないことがあるので、いったんコメントアウト
+          });
+          
           let obj=extractJsonFlexible(text||'')||await repairJson(text||'');
           let title, draftBody, tags; if(obj){title=sanitizeTitle(obj.title); draftBody=String(obj.draftBody||'').trim(); tags=Array.isArray(obj.tags)?obj.tags.map(String):[]}
           if(!title||!draftBody){ title=deriveTitleFromText(text||''); const lines=(text||'').split(/\r?\n/); draftBody=lines.slice(1).join('\n').trim()||(text||''); tags=[]}
@@ -322,11 +282,11 @@ jobs:
           path: .note-artifacts/draft.json
 
   factcheck:
-    name: Fact-check (Tavily)
+    name: Fact-check (Gemini + Tavily)
     needs: write
     runs-on: ubuntu-latest
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
       TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
       TITLE: ${{ needs.write.outputs.title }}
     outputs:
@@ -344,7 +304,7 @@ jobs:
       - name: Install AI SDK
         run: |
           npm init -y
-          npm i ai @ai-sdk/anthropic
+          npm i ai @ai-sdk/google # ★★★ここを @ai-sdk/google に修正！★★★
 
       - name: Restore draft json
         env:
@@ -357,21 +317,18 @@ jobs:
         run: |
           cat > factcheck.mjs <<'EOF'
           import { generateText } from 'ai';
-          import { anthropic } from '@ai-sdk/anthropic';
+          import { google } from '@ai-sdk/google'; // ★★★ここを @ai-sdk/google に修正！★★★
           import fs from 'fs';
           const draft=JSON.parse(fs.readFileSync('.note-artifacts/draft.json','utf8'));
-          const modelName='claude-sonnet-4-20250514';
+          const modelName = 'gemini-2.0-flash-lite';
           const TAVILY_API_KEY=process.env.TAVILY_API_KEY||'';
           if(!TAVILY_API_KEY){ console.error('TAVILY_API_KEY is not set'); process.exit(1); }
 
           function extractJsonFlexible(raw){
             const t=(raw||'').trim().replace(/\u200B/g,'');
-            // try object
             try{ const o=JSON.parse(t); return o; }catch{}
             const fence=t.match(/```[a-zA-Z]*\s*([\s\S]*?)\s*```/); if(fence&&fence[1]){ try{ return JSON.parse(fence[1].trim()); }catch{} }
-            // try object slice
             let f=t.indexOf('{'), l=t.lastIndexOf('}'); if(f!==-1&&l!==-1&&l>f){ const cand=t.slice(f,l+1); try{ return JSON.parse(cand); }catch{} }
-            // try array slice
             f=t.indexOf('['); l=t.lastIndexOf(']'); if(f!==-1&&l!==-1&&l>f){ const cand=t.slice(f,l+1); try{ return JSON.parse(cand); }catch{} }
             return null;
           }
@@ -382,8 +339,15 @@ jobs:
           }
 
           async function proposeQueries(body){
-            const sys='あなたは事実検証の専門家です。入力本文から検証が必要な固有名詞・数値・主張を抽出し、Tavily検索用に日本語の検索クエリを最大10件の配列で返してください。出力はJSON配列のみ。';
-            const { text } = await generateText({ model: anthropic(modelName), system: sys, prompt: String(body), temperature: 0, maxTokens: 2000 });
+            const sys='あなたは事実検証の専門家です。入力本文から検証が必要な固有名詞・数値・主張を抽出し、Tavily検索用に日本語の検索クエリを最大10件の配列で返してください。出力は ["クエリ1", "クエリ2"] という厳密なJSON配列のみを返してください。JSON以外のテキストは一切含めないでください。';
+            const { text } = await generateText({
+              model: google(modelName), // ★★★ここを google() に修正！★★★
+              system: sys,
+              prompt: String(body),
+              temperature: 0,
+              maxTokens: 2000,
+              // responseFormat: { type: 'json' }, // ★Gemini ProはJSONモードをサポートしてないことがあるので、いったんコメントアウト
+            });
             const arr = extractJsonFlexible(text||'');
             return Array.isArray(arr) ? arr.map(String).filter(Boolean).slice(0,10) : [];
           }
@@ -423,11 +387,20 @@ jobs:
               'あなたは事実検証の専門家です。以下の原稿（note記事の下書き）に対し、提供されたエビデンス（Tavily検索結果）に基づき、',
               '誤情報の修正・低信頼出典の置換・信頼できる一次情報の本文内Markdownリンク埋め込みを行って、修正後の本文のみ返してください。',
               '文体・構成は原稿を尊重し、必要に応じて本文末尾に参考文献セクションを追加してください。',
+              '【重要】JSONやコードフェンス（```）は絶対に使わず、Markdownの本文だけを返してください。',
             ].join('\n');
             const prompt = [
               '## 原稿', String(draft.draftBody||''), '', '## エビデンス（Tavily検索結果）', evidence
             ].join('\n\n');
-            const { text } = await generateText({ model: anthropic(modelName), system: sys, prompt, temperature: 0.3, maxTokens: 30000 });
+            
+            const { text } = await generateText({
+              model: google(modelName), // ★★★ここを google() に修正！★★★
+              system: sys,
+              prompt,
+              temperature: 0.3,
+              maxTokens: 30000,
+            });
+            
             let body = stripCodeFence(text||'');
             let title = process.env.TITLE || draft.title || '';
             let tags = Array.isArray(draft.tags)? draft.tags: [];
@@ -470,325 +443,70 @@ jobs:
     name: Post to note.com (Playwright)
     needs: factcheck
     if: ${{ github.event.inputs.dry_run != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {0}
     env:
       IS_PUBLIC: ${{ github.event.inputs.is_public }}
       STATE_JSON: ${{ secrets.NOTE_STORAGE_STATE_JSON }}
       START_URL: https://editor.note.com/new
-    outputs:
-      final_url: ${{ steps.publish.outputs.published_url || steps.publish.outputs.draft_url }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      - name: Show outbound IP
+        run: '(Invoke-RestMethod https://api.ipify.org).ToString() | Write-Output'
 
       - name: Install Playwright
         run: |
           npm init -y
           npm i playwright marked
-          npx playwright install --with-deps chromium | cat
+          npx playwright install chromium
 
       - name: Prepare storageState
         id: state
         run: |
-          test -n "$STATE_JSON" || (echo "ERROR: NOTE_STORAGE_STATE_JSON secret is not set" && exit 1)
-          mkdir -p "$RUNNER_TEMP"
-          echo "$STATE_JSON" > "$RUNNER_TEMP/note-state.json"
-          echo "STATE_PATH=$RUNNER_TEMP/note-state.json" >> $GITHUB_OUTPUT
-
-      - name: Ensure jq (post)
-        run: |
-          if ! command -v jq >/dev/null 2>&1; then
-            sudo apt-get update -y
-            sudo apt-get install -y jq
-          fi
+          if (-not $env:STATE_JSON) { Write-Error "NOTE_STORAGE_STATE_JSON secret is not set"; exit 1 }
+          $tmp = "$env:RUNNER_TEMP\note-state.json"
+          Set-Content -LiteralPath $tmp -Value $env:STATE_JSON -NoNewline
+          "STATE_PATH=$tmp" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Restore final
         id: draft
         env:
           FINAL_B64: ${{ needs.factcheck.outputs.final_b64 }}
         run: |
-          test -n "$FINAL_B64" || { echo "final_b64 output is empty"; exit 1; }
-          echo "$FINAL_B64" | base64 -d > final.json || echo "$FINAL_B64" | base64 --decode > final.json
-          echo "TITLE=$(jq -r .title final.json)" >> $GITHUB_OUTPUT
-          echo "TAGS=$(jq -r '.tags | join(", ")' final.json)" >> $GITHUB_OUTPUT
+          if (-not $env:FINAL_B64) { Write-Error "final_b64 output is empty"; exit 1 }
+          $bytes = [Convert]::FromBase64String($env:FINAL_B64)
+          [IO.File]::WriteAllBytes("final.json", $bytes)
+          $title = (Get-Content final.json -Raw | ConvertFrom-Json).title
+          $tags  = (Get-Content final.json -Raw | ConvertFrom-Json).tags -join ", "
+          "TITLE=$title" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "TAGS=$tags"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Publish via Playwright (draft or public)
         id: publish
         env:
           TITLE: ${{ steps.draft.outputs.TITLE }}
-          TAGS: ${{ steps.draft.outputs.TAGS }}
+          TAGS:  ${{ steps.draft.outputs.TAGS }}
           STATE_PATH: ${{ steps.state.outputs.STATE_PATH }}
+          START_URL: ${{ env.START_URL }}
+          IS_PUBLIC: ${{ env.IS_PUBLIC }}
         run: |
-          # 本文は後続スクリプト内でMarkdownリンク→素URL化などの前処理を行う
-          cat > post.mjs <<'EOF'
-          import { chromium } from 'playwright';
-          import { marked } from 'marked';
-          import fs from 'fs';
-          import os from 'os';
-          import path from 'path';
+          node post.mjs | Tee-Object -FilePath post.log
 
-          function nowStr(){ const d=new Date(); const z=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}_${z(d.getHours())}-${z(d.getMinutes())}-${z(d.getSeconds())}`; }
-
-          const STATE_PATH=process.env.STATE_PATH;
-          const START_URL=process.env.START_URL||'https://editor.note.com/new';
-          const rawTitle=process.env.TITLE||'';
-          const rawFinal=JSON.parse(fs.readFileSync('final.json','utf8'));
-          const rawBody=String(rawFinal.body||'');
-          const TAGS=process.env.TAGS||'';
-          const IS_PUBLIC=String(process.env.IS_PUBLIC||'false')==='true';
-
-          if(!fs.existsSync(STATE_PATH)){ console.error('storageState not found:', STATE_PATH); process.exit(1); }
-
-          const ssDir=path.join(os.tmpdir(),'note-screenshots'); fs.mkdirSync(ssDir,{recursive:true}); const SS_PATH=path.join(ssDir,`note-post-${nowStr()}.png`);
-
-          function sanitizeTitle(t){
-            let s=String(t||'').trim();
-            s=s.replace(/^```[a-zA-Z0-9_-]*\s*$/,'').replace(/^```$/,'');
-            s=s.replace(/^#+\s*/,'');
-            s=s.replace(/^"+|"+$/g,'').replace(/^'+|'+$/g,'');
-            s=s.replace(/^`+|`+$/g,'');
-            s=s.replace(/^json$/i,'').trim();
-            // タイトルが波括弧や記号のみの時は無効として扱う
-            if (/^[\{\}\[\]\(\)\s]*$/.test(s)) s='';
-            if(!s) s='タイトル（自動生成）';
-            return s;
-          }
-          function deriveTitleFromMarkdown(md){
-            const lines=String(md||'').split(/\r?\n/);
-            for (const line of lines){
-              const l=line.trim();
-              if(!l) continue;
-              const m=l.match(/^#{1,3}\s+(.+)/); if(m) return sanitizeTitle(m[1]);
-              if(!/^```|^>|^\* |^- |^\d+\. /.test(l)) return sanitizeTitle(l);
-            }
-            return '';
-          }
-          function normalizeBullets(md){
-            // 先頭の中黒・ビュレットを箇条書きに正規化
-            return String(md||'')
-              .replace(/^\s*[•・]\s?/gm,'- ')
-              .replace(/^\s*◦\s?/gm,'  - ');
-          }
-          function unwrapParagraphs(md){
-            // 段落中の不必要な改行をスペースへ（見出し/リスト/引用/コードは除外）
-            const lines=String(md||'').split(/\r?\n/);
-            const out=[]; let buf=''; let inFence=false;
-            for(const raw of lines){
-              const line=raw.replace(/\u200B/g,'');
-              if(/^```/.test(line)){ inFence=!inFence; buf+=line+'\n'; continue; }
-              if(inFence){ buf+=line+'\n'; continue; }
-              if(/^\s*$/.test(line)){ if(buf) out.push(buf.trim()); out.push(''); buf=''; continue; }
-              // 箇条書きや番号付きの字下げ改行を一行に連結
-              if(/^(#{1,6}\s|[-*+]\s|\d+\.\s|>\s)/.test(line)){
-                if(buf){ out.push(buf.trim()); buf=''; }
-                // 次の数行が連続して単語単位の改行の場合は連結
-                out.push(line.replace(/\s+$/,''));
-                continue;
-              }
-              // 行頭が1文字や数文字で改行されているケース（縦伸び）を連結
-              if(buf){ buf += (/[。.!?)]$/.test(buf) ? '\n' : ' ') + line.trim(); }
-              else { buf = line.trim(); }
-            }
-            if(buf) out.push(buf.trim());
-            return out.join('\n');
-          }
-          function preferBareUrls(md){
-            const embedDomains=['openai.com','youtube.com','youtu.be','x.com','twitter.com','speakerdeck.com','slideshare.net','google.com','maps.app.goo.gl','gist.github.com'];
-            return String(md||'').replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,(m,text,url)=>{
-              try{
-                const u=new URL(url); const host=u.hostname.replace(/^www\./,'');
-                const isEmbed = embedDomains.some(d=>host.endsWith(d) || (url.includes('google.com/maps') && d.includes('google.com')));
-                return isEmbed ? `${text}\n${url}\n` : `${text} (${url})`;
-              }catch{return `${text} ${url}`;}
-            });
-          }
-          function isGarbageLine(line){
-            return /^[\s\{\}\[\]\(\)`]+$/.test(line || '');
-          }
-          function normalizeListItemSoftBreaks(md){
-            const lines=String(md||'').split(/\r?\n/);
-            const out=[]; let inItem=false;
-            const listStartRe=/^(\s*)(?:[-*+]\s|\d+\.\s)/;
-            for (let i=0;i<lines.length;i++){
-              const line=lines[i];
-              if (listStartRe.test(line)){
-                inItem=true;
-                out.push(line.replace(/\s+$/,''));
-                continue;
-              }
-              if (inItem){
-                // 空行 or 次のリスト開始でアイテム終端
-                if (!line.trim()) { out.push(line); inItem=false; continue; }
-                if (listStartRe.test(line)) { inItem=false; out.push(line); continue; }
-                // 継続行は1行へ連結
-                const last = out.pop() || '';
-                out.push(last + ' ' + line.trim());
-                continue;
-              }
-              out.push(line);
-            }
-            return out.join('\n');
-          }
-          function splitMarkdownBlocks(md){
-            const lines=String(md||'').split(/\r?\n/);
-            const blocks=[]; let cur=[]; let inFence=false; let fenceTag='';
-            for(const line of lines){
-              const m=line.match(/^```(.*)$/);
-              if(m){
-                if(!inFence){ inFence=true; fenceTag=m[1]||''; cur.push(line); }
-                else { inFence=false; fenceTag=''; cur.push(line); blocks.push(cur.join('\n')); cur=[]; continue; }
-              } else if(!inFence && line.trim()===''){ if(cur.length){ blocks.push(cur.join('\n')); cur=[]; continue; } }
-              else if(!inFence && isGarbageLine(line)) { continue; }
-              cur.push(line);
-            }
-            if(cur.length) blocks.push(cur.join('\n'));
-            return blocks.filter(b=>{ const t=b.trim(); return t.length>0 && !isGarbageLine(t); });
-          }
-          function mdToHtml(block){
-            // JSONが紛れ込んでしまった場合は本文候補のみ抽出
-            try{
-              const maybe = JSON.parse(block);
-              if (maybe && typeof maybe==='object' && !Array.isArray(maybe)){
-                const candidates=[maybe.body, maybe.draftBody, maybe.content, maybe.text];
-                const chosen=candidates.find(v=>typeof v==='string' && v.trim());
-                if (chosen) block = String(chosen);
-              }
-            }catch{}
-            const isList = /^\s*(?:[-*+]\s|\d+\.\s)/.test(block);
-            return String(marked.parse(block, { gfm:true, breaks: !isList, mangle:false, headerIds:false }) || '');
-          }
-          function htmlFromMarkdown(md){
-            // 全文を一括でHTML化（段落ベース）。リスト中の意図しない <br> を避けるため breaks=false
-            return String(marked.parse(md, { gfm:true, breaks:false, mangle:false, headerIds:false }) || '');
-          }
-          async function insertHTML(page, locator, html){
-            await locator.click();
-            await locator.evaluate((el, html) => {
-              el.focus();
-              const sel = window.getSelection();
-              const range = document.createRange();
-              range.selectNodeContents(el);
-              range.collapse(false);
-              sel.removeAllRanges();
-              sel.addRange(range);
-              document.execCommand('insertHTML', false, html);
-            }, html);
-          }
-
-          let TITLE=sanitizeTitle(rawTitle);
-          let preBody = preferBareUrls(rawBody);
-          preBody = normalizeBullets(preBody);
-          preBody = normalizeListItemSoftBreaks(preBody);
-          preBody = unwrapParagraphs(preBody);
-          if(!TITLE || TITLE==='タイトル（自動生成）'){
-            const d=deriveTitleFromMarkdown(preBody);
-            if(d) TITLE=d;
-          }
-          const blocks = splitMarkdownBlocks(preBody);
-
-          let browser, context, page;
-          try{
-            browser = await chromium.launch({ headless: true, args: ['--lang=ja-JP'] });
-            context = await browser.newContext({ storageState: STATE_PATH, locale: 'ja-JP' });
-            page = await context.newPage();
-            page.setDefaultTimeout(180000);
-
-            await page.goto(START_URL, { waitUntil: 'domcontentloaded' });
-            await page.waitForSelector('textarea[placeholder*="タイトル"]');
-            await page.fill('textarea[placeholder*="タイトル"]', TITLE);
-
-            const bodyBox = page.locator('div[contenteditable="true"][role="textbox"]').first();
-            await bodyBox.waitFor({ state: 'visible' });
-            const htmlAll = htmlFromMarkdown(preBody);
-            let pasted = false;
-            try {
-              const origin = new URL(START_URL).origin;
-              await context.grantPermissions(['clipboard-read','clipboard-write'], { origin });
-              await page.evaluate(async (html, plain) => {
-                const item = new ClipboardItem({
-                  'text/html': new Blob([html], { type: 'text/html' }),
-                  'text/plain': new Blob([plain], { type: 'text/plain' }),
-                });
-                await navigator.clipboard.write([item]);
-              }, htmlAll, preBody);
-              await bodyBox.click();
-              await page.keyboard.press('Control+V');
-              await page.waitForTimeout(200);
-              pasted = true;
-            } catch (e) {
-              // クリップボード権限が無い場合のフォールバック
-            }
-            if (!pasted) {
-              // 一括HTML挿入フォールバック
-              await insertHTML(page, bodyBox, htmlAll);
-              await page.waitForTimeout(100);
-            }
-
-            if(!IS_PUBLIC){
-              const saveBtn = page.locator('button:has-text("下書き保存"), [aria-label*="下書き保存"]').first();
-              await saveBtn.waitFor({ state: 'visible' });
-              if(await saveBtn.isEnabled()) { await saveBtn.click(); await page.locator('text=保存しました').waitFor({ timeout: 4000 }).catch(()=>{}); }
-              await page.screenshot({ path: SS_PATH, fullPage: true });
-              console.log('DRAFT_URL=' + page.url());
-              console.log('SCREENSHOT=' + SS_PATH);
-              process.exit(0);
-            }
-
-            const proceed = page.locator('button:has-text("公開に進む")').first();
-            await proceed.waitFor({ state: 'visible' });
-            for (let i=0;i<20;i++){ if (await proceed.isEnabled()) break; await page.waitForTimeout(100); }
-            await proceed.click({ force: true });
-
-            await Promise.race([
-              page.waitForURL(/\/publish/i).catch(() => {}),
-              page.locator('button:has-text("投稿する")').first().waitFor({ state: 'visible' }).catch(() => {}),
-            ]);
-
-            const tags=(TAGS||'').split(/[\n,]/).map(s=>s.trim()).filter(Boolean);
-            if(tags.length){
-              let tagInput=page.locator('input[placeholder*="ハッシュタグ"]');
-              if(!(await tagInput.count())) tagInput=page.locator('input[role="combobox"]').first();
-              await tagInput.waitFor({ state: 'visible' });
-              for(const t of tags){ await tagInput.click(); await tagInput.fill(t); await page.keyboard.press('Enter'); await page.waitForTimeout(120); }
-            }
-
-            const publishBtn = page.locator('button:has-text("投稿する")').first();
-            await publishBtn.waitFor({ state: 'visible' });
-            for (let i=0;i<20;i++){ if (await publishBtn.isEnabled()) break; await page.waitForTimeout(100); }
-            await publishBtn.click({ force: true });
-
-            await Promise.race([
-              page.waitForURL(u => !/\/publish/i.test(typeof u === 'string' ? u : u.toString()), { timeout: 20000 }).catch(() => {}),
-              page.locator('text=投稿しました').first().waitFor({ timeout: 8000 }).catch(() => {}),
-              page.waitForTimeout(5000),
-            ]);
-
-            await page.screenshot({ path: SS_PATH, fullPage: true });
-            const finalUrl=page.url();
-            console.log('PUBLISHED_URL=' + finalUrl);
-            console.log('SCREENSHOT=' + SS_PATH);
-          } finally {
-            try{ await page?.close(); }catch{}
-            try{ await context?.close(); }catch{}
-            try{ await browser?.close(); }catch{}
-          }
-          EOF
-          node post.mjs | tee post.log
-          url=$(grep '^PUBLISHED_URL=' post.log | tail -n1 | cut -d'=' -f2-)
-          draft=$(grep '^DRAFT_URL=' post.log | tail -n1 | cut -d'=' -f2-)
-          shot=$(grep '^SCREENSHOT=' post.log | tail -n1 | cut -d'=' -f2-)
-          if [ -n "$url" ]; then echo "published_url=$url" >> $GITHUB_OUTPUT; fi
-          if [ -n "$draft" ]; then echo "draft_url=$draft" >> $GITHUB_OUTPUT; fi
-          if [ -n "$shot" ]; then echo "screenshot=$shot" >> $GITHUB_OUTPUT; fi
-
-      - name: Upload screenshot (if any)
-        if: ${{ steps.publish.outputs.screenshot != '' }}
+      - name: Upload debug artifacts (always)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: note-screenshot
-          path: ${{ steps.publish.outputs.screenshot }}
+          name: note-debug-artifacts
+          path:
+            - network.har
+            - trace.zip
+            - post.log
+            - **/*.png
