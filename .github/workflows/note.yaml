@@ -450,7 +450,6 @@ jobs:
         shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {0}
     env:
       IS_PUBLIC: ${{ github.event.inputs.is_public }}
-      STATE_JSON: ${{ secrets.NOTE_STORAGE_STATE_JSON }}
       START_URL: https://editor.note.com/new
     steps:
       - uses: actions/checkout@v4
@@ -468,13 +467,22 @@ jobs:
           npm i playwright marked
           npx playwright install chromium
 
-      - name: Prepare storageState
+      - name: Prepare storageState (decode from NOTE_STATE_B64)
         id: state
+        env:
+          STATE_B64: ${{ secrets.NOTE_STATE_B64 }}
         run: |
-          if (-not $env:STATE_JSON) { Write-Error "NOTE_STORAGE_STATE_JSON secret is not set"; exit 1 }
-          $tmp = "$env:RUNNER_TEMP\note-state.json"
-          Set-Content -LiteralPath $tmp -Value $env:STATE_JSON -NoNewline
-          "STATE_PATH=$tmp" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          if (-not $env:STATE_B64) { Write-Error "NOTE_STATE_B64 secret is not set"; exit 1 }
+          $path = Join-Path $env:RUNNER_TEMP "note-state.json"
+
+          # Base64 → バイト列 → ファイル
+          [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($env:STATE_B64))
+
+          # ✅ JSONとして正しいか検査（壊れてたらここで止まる）
+          Get-Content $path -Raw | ConvertFrom-Json | Out-Null
+
+          # 次のステップに「置き場所」を教える
+          "STATE_PATH=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Restore final
         id: draft
@@ -492,9 +500,9 @@ jobs:
       - name: Publish via Playwright (draft or public)
         id: publish
         env:
+          STATE_PATH: ${{ steps.state.outputs.STATE_PATH }}  # ← これ！
           TITLE: ${{ steps.draft.outputs.TITLE }}
           TAGS:  ${{ steps.draft.outputs.TAGS }}
-          STATE_PATH: ${{ steps.state.outputs.STATE_PATH }}
           START_URL: ${{ env.START_URL }}
           IS_PUBLIC: ${{ env.IS_PUBLIC }}
         run: |

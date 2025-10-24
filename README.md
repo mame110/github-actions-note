@@ -15,7 +15,7 @@
 
 - `ANTHROPIC_API_KEY`（必須）- Claude APIキー
 - `TAVILY_API_KEY`（必須）- Tavily検索APIキー
-- `NOTE_STORAGE_STATE_JSON`（必須）- note.comのログイン状態（後述の手順で取得）
+- `NOTE_STATE_B64`（必須）- Base64文字列化した note.com のログイン状態（後述の手順で取得）
 
 ---
 
@@ -107,10 +107,12 @@ node login-note.mjs
 
 ### 4. Secret に保存
 
-1. 生成された `note-state.json` の内容を全選択してコピー
+1. 生成された `note-state.json` をBase64文字列に変換します
+   - macOS/Linux: `base64 -w 0 note-state.json`
+   - Windows (PowerShell): `[Convert]::ToBase64String([IO.File]::ReadAllBytes('note-state.json'))`
 2. GitHub リポジトリ Settings > Secrets and variables > Actions > New repository secret
-3. Name: `NOTE_STORAGE_STATE_JSON`
-4. Secret: コピーした JSON の内容全体を貼り付け
+3. Name: `NOTE_STATE_B64`
+4. Secret: 1 で得たBase64文字列を貼り付け
 
 ---
 
@@ -124,7 +126,7 @@ node login-note.mjs
    - `is_public: true` の場合は「公開」
    - `dry_run: true` の場合は投稿をスキップ
 
-ワークフロー実行時に `NOTE_STORAGE_STATE_JSON` を一時ファイルに展開し、Playwright の storageState として使用します。
+ワークフロー実行時に `NOTE_STATE_B64` をデコードして一時ファイルに展開し、Playwright の storageState として使用します。JSONとして壊れている場合は展開時に検知して処理が停止します。
 
 ---
 
