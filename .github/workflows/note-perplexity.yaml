@@ -450,9 +450,25 @@ jobs:
         id: state
         run: |
           if (-not $env:STATE_JSON) { Write-Error "NOTE_STORAGE_STATE_JSON secret is not set"; exit 1 }
+
+          # 1) BOMなしでファイルに書く
           $tmp = "$env:RUNNER_TEMP\note-state.json"
-          Set-Content -LiteralPath $tmp -Value $env:STATE_JSON -NoNewline -Encoding utf8
-          Get-Content -LiteralPath $tmp -Raw -Encoding UTF8 | ConvertFrom-Json > $null
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText($tmp, $env:STATE_JSON, $utf8NoBom)
+
+          # 2) ちゃんとJSONとして読めるか検証（ここで落ちれば内容か書き込みが壊れてる）
+          try {
+            $raw = Get-Content -LiteralPath $tmp -Raw -Encoding UTF8
+            $obj = $raw | ConvertFrom-Json
+            if (-not $obj.cookies) { throw "cookies が見つかりません" }
+            $note = $obj.cookies | Where-Object { $_.name -eq "_note_session_v5" -and $_.domain -match "note\.com$" }
+            if (-not $note) { throw "_note_session_v5 クッキーがありません（ログイン状態ではありません）" }
+          } catch {
+            Write-Error "storageState のJSONが不正です: $($_.Exception.Message)"
+            if ($raw) { Write-Host "先頭120文字:`n$($raw.Substring(0, [Math]::Min(120, $raw.Length)))" }
+            exit 1
+          }
+
           "STATE_PATH=$tmp" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       # ★UTF-8で確実に読む（文字化け対策）
