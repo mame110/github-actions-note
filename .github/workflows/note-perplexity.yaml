@@ -452,6 +452,7 @@ jobs:
           if (-not $env:STATE_JSON) { Write-Error "NOTE_STORAGE_STATE_JSON secret is not set"; exit 1 }
           $tmp = "$env:RUNNER_TEMP\note-state.json"
           Set-Content -LiteralPath $tmp -Value $env:STATE_JSON -NoNewline -Encoding utf8
+          Get-Content -LiteralPath $tmp -Raw -Encoding UTF8 | ConvertFrom-Json > $null
           "STATE_PATH=$tmp" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       # ★UTF-8で確実に読む（文字化け対策）
