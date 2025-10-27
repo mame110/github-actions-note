@@ -217,7 +217,7 @@ jobs:
           const inputTags=(process.env.INPUT_TAGS||'').split(',').map(s=>s.trim()).filter(Boolean);
           const researchReport=fs.readFileSync('.note-artifacts/research.md','utf8');
           const modelName = 'gemini-1.5-flash-latest';
-          function extractJsonFlexible(raw){const t=(raw||'').trim().replace(/\u200B/g,'');try{return JSON.parse(t);}catch{}const m=t.match(/```[a-zA-Z]*\s*(*?)\s*```/);if(m&&m[3]){try{return JSON.parse(m.[3]trim());}catch{}}const f=t.indexOf('{'),l=t.lastIndexOf('}');if(f!==-1&&l!==-1&&l>f){const c=t.slice(f,l+1);try{return JSON.parse(c);}catch{}}return null;}
+          function extractJsonFlexible(raw){const t=(raw||'').trim().replace(/\u200B/g,'');try{return JSON.parse(t);}catch{}const m=t.match(/```[a-zA-Z]*\s*(*?)\s*```/);if(m&&m[5]){try{return JSON.parse(m.[5]trim());}catch{}}const f=t.indexOf('{'),l=t.lastIndexOf('}');if(f!==-1&&l!==-1&&l>f){const c=t.slice(f,l+1);try{return JSON.parse(c);}catch{}}return null;}
 
           async function repairJson(raw){
             const sys='あなたはJSON整形アシスタントです。入力されたテキストから、{"title":string,"draftBody":string,"tags":string} の形式でJSONオブジェクトを抽出または生成し、JSON文字列のみを返してください。JSON以外のテキストは一切含めないでください。';
@@ -259,9 +259,21 @@ jobs:
           });
 
           let obj=extractJsonFlexible(text||'')||await repairJson(text||'');
-          let title, draftBody, tags; if(obj){title=sanitizeTitle(obj.title); draftBody=String(obj.draftBody||'').trim(); tags=Array.isArray(obj.tags)?obj.tags.map(String):}
-          if(!title||!draftBody){ title=deriveTitleFromText(text||''); const lines=(text||'').split(/\r?\n/); draftBody=lines.slice(1).join('\n').trim()||(text||''); tags=}
-          if(inputTags.length){tags=Array.from(new Set([...(tags||),...inputTags]));}
+          let title, draftBody, tags;
+          if(obj){
+            title=sanitizeTitle(obj.title);
+            draftBody=String(obj.draftBody||'').trim();
+            tags=Array.isArray(obj.tags)?obj.tags.map(String):;
+          }
+          if(!title||!draftBody){
+            title=deriveTitleFromText(text||'');
+            const lines=(text||'').split(/\r?\n/);
+            draftBody=lines.slice(1).join('\n').trim()||(text||'');
+            tags=;
+          }
+          if(inputTags.length){
+            tags=Array.from(new Set([...(tags||),...inputTags]));
+          }
           fs.writeFileSync('.note-artifacts/draft.json',JSON.stringify({title,draftBody,tags},null,2));
           EOF
           node write.mjs
@@ -329,14 +341,14 @@ jobs:
           function extractJsonFlexible(raw){
             const t=(raw||'').trim().replace(/\u200B/g,'');
             try{ const o=JSON.parse(t); return o; }catch{}
-            const fence=t.match(/```[a-zA-Z]*\s*(*?)\s*```/); if(fence&&fence[3]){ try{ return JSON.parse(fence.[3]trim()); }catch{} }
+            const fence=t.match(/```[a-zA-Z]*\s*(*?)\s*```/); if(fence&&fence[5]){ try{ return JSON.parse(fence.[5]trim()); }catch{} }
             let f=t.indexOf('{'), l=t.lastIndexOf('}'); if(f!==-1&&l!==-1&&l>f){ const cand=t.slice(f,l+1); try{ return JSON.parse(cand); }catch{} }
             f=t.indexOf('['); l=t.lastIndexOf(']'); if(f!==-1&&l!==-1&&l>f){ const cand=t.slice(f,l+1); try{ return JSON.parse(cand); }catch{} }
             return null;
           }
           function stripCodeFence(s){
             const t=String(s||'').trim();
-            const m=t.match(/^```[a-zA-Z0-9_-]*\s*(*?)\s*```\s*$/); if(m&&m[3]) return m.[3]trim();
+            const m=t.match(/^```[a-zA-Z0-9_-]*\s*(*?)\s*```\s*$/); if(m&&m[5]) return m.[5]trim();
             return t;
           }
           async function proposeQueries(body){
@@ -518,9 +530,9 @@ jobs:
         run: |
           if (Test-Path -LiteralPath "post.log") {
             $txt = Get-Content -LiteralPath "post.log" -Raw -Encoding UTF8
-            if ($txt -match "PUBLISHED_URL=(.+)") { "published_url=$($matches.[3]Trim())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
-            if ($txt -match "DRAFT_URL=(.+)")     { "draft_url=$($matches.[3]Trim())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
-            if ($txt -match "SCREENSHOT=(.+)")    { "screenshot=$($matches.[3]Trim())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
+            if ($txt -match "PUBLISHED_URL=(.+)") { "published_url=$($matches.[5]Trim())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
+            if ($txt -match "DRAFT_URL=(.+)")     { "draft_url=$($matches.[5]Trim())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
+            if ($txt -match "SCREENSHOT=(.+)")    { "screenshot=$($matches.[5]Trim())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
           }
 
       - name: Upload note screenshot
