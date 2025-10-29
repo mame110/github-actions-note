@@ -90,7 +90,7 @@ jobs:
 
 | '';
           const modelName = 'gemini-1.5-flash-latest';
-
+          
           if (!TAVILY_API_KEY) { console.error('TAVILY_API_KEY is not set'); process.exit(1); }
           async function tavilySearch(q) {
             const res = await fetch('https://api.tavily.com/search', {
@@ -103,7 +103,7 @@ jobs:
 
 | null };
           }
-
+          
           function formatEvidence(items) {
             const lines =;
             for (const it of items) {
@@ -129,7 +129,7 @@ jobs:
             const searchQuery = `「${theme}」について、ターゲット「${target}」向けの最新情報。一次情報（公的機関・規格・論文・公式）を優先して検索。`;
             const searchResult = await tavilySearch(searchQuery);
             const evidence = formatEvidence();
-
+            
             const sys = [
               'あなたは最新情報の収集と要約に特化した超一流のリサーチャーです。',
               '提供された検索結果（エビデンス）に基づき、事実ベースでレポートを作成してください。',
@@ -137,7 +137,7 @@ jobs:
               '十分な分量（目安: 2,000語以上）で、章立てして詳細に記述してください。',
             ].join('\n');
             const userPrompt = `以下のテーマ、ターゲット、エビデンスに基づき、最終版のリサーチレポートを作成してください。\n【重要】途中経過や確認質問は一切せず、最終レポートのみを返してください。\n---\nテーマ: ${theme}\nターゲット: ${target}\n現在日付: ${today}\n\n## エビデンス（Tavily検索結果）\n${evidence}`;
-
+            
             const { text } = await generateText({
               model: google(modelName),
               system: sys,
@@ -145,14 +145,14 @@ jobs:
               temperature: 0.5,
               maxTokens: 8000,
             });
-
+            
             const assistantTexts = text |
 
 | '';
             fs.writeFileSync(`${artifactsDir}/research.md`, assistantTexts);
             try { fs.writeFileSync(`${artifactsDir}/research_trace.json`, JSON.stringify({ searchResult, report: assistantTexts }, null, 2)); } catch {}
           }
-
+          
           await main();
           EOF
           node research.mjs
@@ -172,6 +172,7 @@ jobs:
           path: |
            .note-artifacts/research.md
            .note-artifacts/research_trace.json
+
   write:
     name: Write (Gemini)
     needs: research
@@ -217,8 +218,8 @@ jobs:
           const inputTags=(process.env.INPUT_TAGS||'').split(',').map(s=>s.trim()).filter(Boolean);
           const researchReport=fs.readFileSync('.note-artifacts/research.md','utf8');
           const modelName = 'gemini-1.5-flash-latest';
-          function extractJsonFlexible(raw){const t=(raw||'').trim().replace(/\u200B/g,'');try{return JSON.parse(t);}catch{}const m=t.match(/```[a-zA-Z]*\s*(*?)\s*```/);if(m&&m[5]){try{return JSON.parse(m.[5]trim());}catch{}}const f=t.indexOf('{'),l=t.lastIndexOf('}');if(f!==-1&&l!==-1&&l>f){const c=t.slice(f,l+1);try{return JSON.parse(c);}catch{}}return null;}
-
+          function extractJsonFlexible(raw){const t=(raw||'').trim().replace(/\u200B/g,'');try{return JSON.parse(t);}catch{}const m=t.match(/```[a-zA-Z]*\s*(*?)\s*```/);if(m&&m[3]){try{return JSON.parse(m.[3]trim());}catch{}}const f=t.indexOf('{'),l=t.lastIndexOf('}');if(f!==-1&&l!==-1&&l>f){const c=t.slice(f,l+1);try{return JSON.parse(c);}catch{}}return null;}
+          
           async function repairJson(raw){
             const sys='あなたはJSON整形アシスタントです。入力されたテキストから、{"title":string,"draftBody":string,"tags":string} の形式でJSONオブジェクトを抽出または生成し、JSON文字列のみを返してください。JSON以外のテキストは一切含めないでください。';
             const {text}=await generateText({
@@ -230,7 +231,7 @@ jobs:
             });
             return extractJsonFlexible(text||'');
           }
-
+          
           function sanitizeTitle(t){
             let s=String(t||'').trim();
             s=s.replace(/^```[a-zA-Z0-9_-]*\s*$/,'').replace(/^```$/,'');
@@ -246,10 +247,10 @@ jobs:
             const firstReal=lines.find(l=>!/^```/.test(l))||lines||'';
             return sanitizeTitle(firstReal);
           }
-
+          
           const sysWrite='あなたはnote.comに投稿するためのプロのライターです。長文の魅力的な記事を生成してください。\n必ず {"title":"記事タイトル","draftBody":"Markdown形式の記事本文","tags":["タグ1","タグ2"]} という厳密なJSON形式で返答してください。JSON以外のテキストは絶対に含めないでください。\ndraftBodyは6000〜9000文字を目安に十分な分量で、読者を惹きつける導入、具体的な内容（章ごとにH2（##）やH3（###）の小見出しと箇条書きを適切に含めること）、そして読後のアクション（CTA）に繋がる明確な結論を含めてください。';
           const prompt=.join('\n');
-
+          
           const {text}=await generateText({
             model: google(modelName),
             system:sysWrite,
@@ -257,7 +258,7 @@ jobs:
             temperature:0.7,
             maxTokens:30000,
           });
-
+          
           let obj=extractJsonFlexible(text||'')||await repairJson(text||'');
           let title, draftBody, tags;
           if(obj){
@@ -341,14 +342,14 @@ jobs:
           function extractJsonFlexible(raw){
             const t=(raw||'').trim().replace(/\u200B/g,'');
             try{ const o=JSON.parse(t); return o; }catch{}
-            const fence=t.match(/```[a-zA-Z]*\s*(*?)\s*```/); if(fence&&fence[5]){ try{ return JSON.parse(fence.[5]trim()); }catch{} }
+            const fence=t.match(/```[a-zA-Z]*\s*(*?)\s*```/); if(fence&&fence[3]){ try{ return JSON.parse(fence.[3]trim()); }catch{} }
             let f=t.indexOf('{'), l=t.lastIndexOf('}'); if(f!==-1&&l!==-1&&l>f){ const cand=t.slice(f,l+1); try{ return JSON.parse(cand); }catch{} }
             f=t.indexOf('['); l=t.lastIndexOf(']'); if(f!==-1&&l!==-1&&l>f){ const cand=t.slice(f,l+1); try{ return JSON.parse(cand); }catch{} }
             return null;
           }
           function stripCodeFence(s){
             const t=String(s||'').trim();
-            const m=t.match(/^```[a-zA-Z0-9_-]*\s*(*?)\s*```\s*$/); if(m&&m[5]) return m.[5]trim();
+            const m=t.match(/^```[a-zA-Z0-9_-]*\s*(*?)\s*```\s*$/); if(m&&m[3]) return m.[3]trim();
             return t;
           }
           async function proposeQueries(body){
@@ -396,7 +397,7 @@ jobs:
             const evidence = formatEvidence(results);
             const sys=.join('\n');
             const prompt =.join('\n\n');
-
+            
             const { text } = await generateText({
               model: google(modelName),
               system: sys,
@@ -404,7 +405,7 @@ jobs:
               temperature: 0.3,
               maxTokens: 30000,
             });
-
+            
             let body = stripCodeFence(text||'');
             let title = process.env.TITLE |
 
@@ -445,6 +446,7 @@ jobs:
           echo "final_b64<<EOF" >> $GITHUB_OUTPUT
           echo "$b64" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
   post:
     name: Post to note.com (Playwright)
     needs: factcheck
@@ -475,7 +477,7 @@ jobs:
         shell: pwsh
         run: |
           if (-not $env:STATE_JSON) { Write-Error "NOTE_STORAGE_STATE_JSON secret is not set"; exit 1 }
-          $tmp = "$($env:RUNNER_TEMP)\note-state.json"
+          $tmp = Join-Path $env:RUNNER_TEMP "note-state.json"
           $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
          ::WriteAllText($tmp, $env:STATE_JSON, $utf8NoBom)
           try {
@@ -530,9 +532,9 @@ jobs:
         run: |
           if (Test-Path -LiteralPath "post.log") {
             $txt = Get-Content -LiteralPath "post.log" -Raw -Encoding UTF8
-            if ($txt -match "PUBLISHED_URL=(.+)") { "published_url=$($matches.[5]Trim())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
-            if ($txt -match "DRAFT_URL=(.+)")     { "draft_url=$($matches.[5]Trim())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
-            if ($txt -match "SCREENSHOT=(.+)")    { "screenshot=$($matches.[5]Trim())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
+            if ($txt -match "PUBLISHED_URL=(.+)") { "published_url=$($matches.[3]Trim())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
+            if ($txt -match "DRAFT_URL=(.+)")     { "draft_url=$($matches.[3]Trim())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
+            if ($txt -match "SCREENSHOT=(.+)")    { "screenshot=$($matches.[3]Trim())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
           }
 
       - name: Upload note screenshot
