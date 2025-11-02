@@ -40,7 +40,11 @@ on:
         options:
           - 'true'
           - 'false'
-
+      runner_label:
+        description: 'self-hostedランナーに追加で付けたラベル（例: DESKTOP-V52MO8L）'
+        required: false
+        default: 'DESKTOP-V52MO8L'
+        type: string
 permissions:
   contents: read
 
