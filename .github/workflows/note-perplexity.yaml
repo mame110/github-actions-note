@@ -427,7 +427,7 @@ jobs:
     name: Post to note.com (Playwright)
     needs: factcheck
     if: ${{ github.event.inputs.dry_run != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64]
     env:
       IS_PUBLIC: ${{ github.event.inputs.is_public }}
       STATE_JSON: ${{ secrets.NOTE_STORAGE_STATE_JSON }}
@@ -444,10 +444,11 @@ jobs:
           node-version: '20'
 
       - name: Install Playwright
+        shell: pwsh
         run: |
           npm init -y
           npm i playwright marked
-          npx playwright install --with-deps chromium | cat
+          npx playwright install chromium
       - name: Prepare storageState
         id: state
         run: |
