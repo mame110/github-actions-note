@@ -447,7 +447,7 @@ jobs:
     timeout-minutes: 30
     defaults:
       run:
-        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {0}
+        shell: pwsh
     env:
       IS_PUBLIC: ${{ github.event.inputs.is_public }}
       STATE_JSON: ${{ secrets.NOTE_STORAGE_STATE_JSON }}
