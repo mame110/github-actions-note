@@ -1,4 +1,4 @@
-name: Note Workflow (Gemini Ver.)
+name: Note Workflow (Gemini Ver2.)
 
 on:
   workflow_dispatch:
