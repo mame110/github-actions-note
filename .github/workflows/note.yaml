@@ -476,19 +476,21 @@ jobs:
           Set-Content -LiteralPath $tmp -Value $env:STATE_JSON -NoNewline
           "STATE_PATH=$tmp" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
+      - name: Download final artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: final-artifact
+          path: .note-artifacts
+
       - name: Restore final
         id: draft
-        env:
-          FINAL_B64: ${{ needs.factcheck.outputs.final_b64 }}
         run: |
-          if (-not $env:FINAL_B64) { Write-Error "final_b64 output is empty"; exit 1 }
-          $bytes = [Convert]::FromBase64String($env:FINAL_B64)
-          [IO.File]::WriteAllBytes("final.json", $bytes)
-          $title = (Get-Content final.json -Raw | ConvertFrom-Json).title
-          $tags  = (Get-Content final.json -Raw | ConvertFrom-Json).tags -join ", "
+          $json = Get-Content ".note-artifacts/final.json" -Raw -Encoding UTF8
+          $obj  = $json | ConvertFrom-Json
+          $title = $obj.title
+          $tags  = ($obj.tags | ForEach-Object { $_.ToString() }) -join ", "
           "TITLE=$title" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "TAGS=$tags"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-
       - name: Publish via Playwright (draft or public)
         id: publish
         env:
