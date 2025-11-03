@@ -26,6 +26,17 @@ if (!fs.existsSync(STATE_PATH)) {
 const screenshotDir = path.join(os.tmpdir(), 'note-screenshots');
 fs.mkdirSync(screenshotDir, { recursive: true });
 const workspaceDir = process.cwd();
+async function copyToWorkspace(tmpFile) {
+  try {
+    const base = path.basename(tmpFile);
+    const dest = path.join(workspaceDir, base);
+    fs.copyFileSync(tmpFile, dest);
+    return dest;
+  } catch (e) {
+    console.warn('copyToWorkspace failed:', e.message);
+    return null;
+  }
+}
 
 let browser;
 let context;
@@ -184,86 +195,6 @@ function deriveTitleFromMarkdown(md) {
   return '';
 }
 
-// ★ここに置き換え
-async function fillTitleInput(page, value) {
-  // 1. よくあるパターンを順番に試す
-  const selectors = [
-    'textarea[placeholder*="タイトル"]',
-    'input[placeholder*="タイトル"]',
-    'textarea[aria-label*="タイトル"]',
-    'input[aria-label*="タイトル"]',
-    '[data-testid*="title"] textarea',
-    '[data-testid*="title"] input',
-    'div[contenteditable="true"][data-placeholder*="タイトル"]',
-    'div[contenteditable="true"][aria-label*="タイトル"]',
-  ];
-
-  for (const sel of selectors) {
-    const loc = page.locator(sel).first();
-    try {
-      await loc.waitFor({ state: 'visible', timeout: 7000 });
-      await loc.scrollIntoViewIfNeeded().catch(() => {});
-      const editable = await loc.isEditable().catch(() => false);
-      if (editable) {
-        await loc.fill(value);
-        return;
-      }
-      const isCE = await loc.evaluate(el => !!(el && el.isContentEditable)).catch(() => false);
-      if (isCE) {
-        await loc.click({ force: true });
-        await page.keyboard.press('Control+A').catch(() => {});
-        await page.keyboard.type(value);
-        return;
-      }
-      // 子に textarea/input がいるタイプ
-      const inner = loc.locator('textarea, input').first();
-      if (await inner.count()) {
-        await inner.waitFor({ state: 'visible', timeout: 3000 });
-        if (await inner.isEditable().catch(() => false)) {
-          await inner.fill(value);
-          return;
-        }
-      }
-    } catch (_) {
-      // 見つからなかったら次
-    }
-  }
-
-  // 2. それでも見つからないときはページ全部を見て「タイトルっぽい」ものを取る
-  const ok = await page.evaluate((val) => {
-    const nodes = Array.from(document.querySelectorAll('textarea, input, [contenteditable="true"]'));
-
-    // placeholder / aria-label に「タイトル」
-    let target =
-      nodes.find(n => {
-        const ph = (n.getAttribute('placeholder') || '').toLowerCase();
-        const al = (n.getAttribute('aria-label') || '').toLowerCase();
-        return ph.includes('タイトル') || al.includes('タイトル') || ph.includes('title') || al.includes('title');
-      }) ||
-      // 画面の上の方にある大きめの入力をタイトル扱いする
-      nodes.find(n => {
-        const r = n.getBoundingClientRect();
-        return r.top >= 0 && r.top < 320 && r.height > 30;
-      });
-
-    if (!target) return false;
-
-    if (target.isContentEditable) {
-      target.focus();
-      target.innerText = val;
-    } else {
-      target.focus();
-      target.value = val;
-      target.dispatchEvent(new Event('input', { bubbles: true }));
-      target.dispatchEvent(new Event('change', { bubbles: true }));
-    }
-    return true;
-  }, value);
-
-  if (!ok) {
-    throw new Error('TITLE_INPUT_NOT_FOUND_AFTER_FALLBACK');
-  }
-}
 
 function normalizeBullets(md) {
   // 先頭の中黒・ビュレットを箇条書きに正規化
