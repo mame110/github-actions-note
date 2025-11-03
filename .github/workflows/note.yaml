@@ -500,6 +500,7 @@ jobs:
           START_URL: ${{ env.START_URL }}
           IS_PUBLIC: ${{ env.IS_PUBLIC }}
         run: |
+          Copy-Item ".note-artifacts/final.json" "final.json" -Force
           node post.mjs | Tee-Object -FilePath post.log
 
       - name: Upload debug artifacts (always)
