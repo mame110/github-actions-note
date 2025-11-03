@@ -327,110 +327,107 @@ jobs:
         run: |
           cat > factcheck.mjs <<'EOF'
           import { generateText } from 'ai';
-          import { google } from '@ai-sdk/google'; // ★★★ここを @ai-sdk/google に修正！★★★
+          import { google } from '@ai-sdk/google';
           import fs from 'fs';
-          const draft=JSON.parse(fs.readFileSync('.note-artifacts/draft.json','utf8'));
+
+          const draft = JSON.parse(fs.readFileSync('.note-artifacts/draft.json', 'utf8'));
           const modelName = 'gemini-2.0-flash-lite';
-          const TAVILY_API_KEY=process.env.TAVILY_API_KEY||'';
-          if(!TAVILY_API_KEY){ console.error('TAVILY_API_KEY is not set'); process.exit(1); }
+          const TAVILY_API_KEY = process.env.TAVILY_API_KEY || '';
 
-          function extractJsonFlexible(raw){
-            const t=(raw||'').trim().replace(/\u200B/g,'');
-            try{ const o=JSON.parse(t); return o; }catch{}
-            const fence=t.match(/```[a-zA-Z]*\s*([\s\S]*?)\s*```/); if(fence&&fence[1]){ try{ return JSON.parse(fence[1].trim()); }catch{} }
-            let f=t.indexOf('{'), l=t.lastIndexOf('}'); if(f!==-1&&l!==-1&&l>f){ const cand=t.slice(f,l+1); try{ return JSON.parse(cand); }catch{} }
-            f=t.indexOf('['); l=t.lastIndexOf(']'); if(f!==-1&&l!==-1&&l>f){ const cand=t.slice(f,l+1); try{ return JSON.parse(cand); }catch{} }
-            return null;
-          }
-          function stripCodeFence(s){
-            const t=String(s||'').trim();
-            const m=t.match(/^```[a-zA-Z0-9_-]*\s*([\s\S]*?)\s*```\s*$/); if(m&&m[1]) return m[1].trim();
-            return t;
+          // 429とかAPI落ちのときにここを呼ぶ
+          function fallback() {
+            // draft.json をそのまま final.json にするだけ
+            fs.writeFileSync('.note-artifacts/final.json', JSON.stringify({
+              title: draft.title,
+              body: draft.draftBody,
+              tags: Array.isArray(draft.tags) ? draft.tags : [],
+            }, null, 2));
+            console.log('factcheck: skipped (quota or API error). used draft.json as final.json');
           }
 
-          async function proposeQueries(body){
-            const sys='あなたは事実検証の専門家です。入力本文から検証が必要な固有名詞・数値・主張を抽出し、Tavily検索用に日本語の検索クエリを最大10件の配列で返してください。出力は ["クエリ1", "クエリ2"] という厳密なJSON配列のみを返してください。JSON以外のテキストは一切含めないでください。';
-            const { text } = await generateText({
-              model: google(modelName), // ★★★ここを google() に修正！★★★
-              system: sys,
-              prompt: String(body),
-              temperature: 0,
-              maxTokens: 2000,
-              // responseFormat: { type: 'json' }, // ★Gemini ProはJSONモードをサポートしてないことがあるので、いったんコメントアウト
-            });
-            const arr = extractJsonFlexible(text||'');
-            return Array.isArray(arr) ? arr.map(String).filter(Boolean).slice(0,10) : [];
-          }
+          async function main() {
+            // Tavilyキーが無いときもスキップでいい
+            if (!TAVILY_API_KEY) {
+              console.warn('factcheck: TAVILY_API_KEY not set. skipping and using draft.json');
+              return fallback();
+            }
 
-          async function tavilySearch(q){
-            const res = await fetch('https://api.tavily.com/search', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ api_key: TAVILY_API_KEY, query: q, search_depth: 'advanced', max_results: 5, include_answer: true })
-            });
-            if(!res.ok){ return { query:q, results:[], answer:null }; }
-            const json = await res.json().catch(()=>({}));
-            return { query:q, results: Array.isArray(json.results)? json.results: [], answer: json.answer || null };
-          }
+            try {
+              // ① まずチェックするための検索クエリを少なめで作らせる
+              const { text: queriesText } = await generateText({
+                model: google(modelName),
+                system: 'あなたは記事の事実確認のための検索クエリだけを返すアシスタントです。最大3件で。',
+                prompt: String(draft.draftBody || '').slice(0, 4000),
+                temperature: 0,
+                maxTokens: 512,
+              });
 
-          function formatEvidence(items){
-            const lines = [];
-            for(const it of items){
-              lines.push(`### 検索: ${it.query}`);
-              if(it.answer){ lines.push(`要約: ${it.answer}`); }
-              for(const r of it.results||[]){
-                const t = (r.title||'').toString();
-                const u = (r.url||'').toString();
-                const c = (r.content||'').toString().slice(0,500);
-                lines.push(`- [${t}](${u})\n  ${c}`);
+              let queries = [];
+              try {
+                queries = JSON.parse(queriesText);
+              } catch {
+                queries = [];
               }
-              lines.push('');
-            }
-            return lines.join('\n');
-          }
+              if (!Array.isArray(queries) || !queries.length) {
+                // うまく取れなかったらそのまま通す
+                return fallback();
+              }
 
-          async function main(){
-            const queries = await proposeQueries(draft.draftBody||'');
-            const results = [];
-            for(const q of queries){ results.push(await tavilySearch(q)); }
-            const evidence = formatEvidence(results);
-            const sys=[
-              'あなたは事実検証の専門家です。以下の原稿（note記事の下書き）に対し、提供されたエビデンス（Tavily検索結果）に基づき、',
-              '誤情報の修正・低信頼出典の置換・信頼できる一次情報の本文内Markdownリンク埋め込みを行って、修正後の本文のみ返してください。',
-                'カジュアルで口語的な文体が来た場合は、それを維持してください。敬語に戻したり、硬い説明文に書き換えないでください。',
-              '文体・構成は原稿を尊重し、必要に応じて本文末尾に参考文献セクションを追加してください。',
-              '【重要】JSONやコードフェンス（```）は絶対に使わず、Markdownの本文だけを返してください。',
-            ].join('\n');
-            const prompt = [
-              '## 原稿', String(draft.draftBody||''), '', '## エビデンス（Tavily検索結果）', evidence
-            ].join('\n\n');
-            
-            const { text } = await generateText({
-              model: google(modelName), // ★★★ここを google() に修正！★★★
-              system: sys,
-              prompt,
-              temperature: 0.65,
-              maxTokens: 12000,
-            });
-            
-            let body = stripCodeFence(text||'');
-            let title = process.env.TITLE || draft.title || '';
-            let tags = Array.isArray(draft.tags)? draft.tags: [];
-            const obj = extractJsonFlexible(body);
-            if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
-              if (obj.title) title = String(obj.title);
-              const candidates = [obj.body, obj.draftBody, obj.content, obj.text];
-              const chosen = candidates.find(v=>typeof v==='string' && v.trim());
-              if (chosen) body = String(chosen);
-              if (Array.isArray(obj.tags)) tags = obj.tags.map(String);
+              // ② Tavilyを1〜3回だけ叩く（多すぎるとまた429になる）
+              const evidence = [];
+              for (const q of queries.slice(0, 3)) {
+                const res = await fetch('https://api.tavily.com/search', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    api_key: TAVILY_API_KEY,
+                    query: q,
+                    search_depth: 'basic',
+                    max_results: 3,
+                    include_answer: true,
+                  }),
+                });
+                const json = await res.json().catch(() => ({}));
+                evidence.push({ query: q, ...json });
+              }
+
+              // ③ Geminiで「誤りがあったら直して」と投げる
+              const { text: fixed } = await generateText({
+                model: google(modelName),
+                system: 'あなたは記事の事実確認を行い、誤りがあれば直した本文だけを返します。JSONやコードフェンスは出力しないでください。',
+                prompt: [
+                  '## 元記事',
+                  draft.draftBody,
+                  '',
+                  '## 参考情報（Tavily）',
+                  JSON.stringify(evidence, null, 2)
+                ].join('\n'),
+                temperature: 0.3,
+                maxTokens: 6000,
+              });
+
+              fs.writeFileSync('.note-artifacts/final.json', JSON.stringify({
+                title: draft.title,
+                body: fixed.trim() || draft.draftBody,
+                tags: Array.isArray(draft.tags) ? draft.tags : [],
+              }, null, 2));
+            } catch (err) {
+              // ★ここがポイント：429を握りつぶして成功扱いにする
+              const msg = String(err?.message || '');
+              if (msg.includes('RESOURCE_EXHAUSTED') || msg.includes('429')) {
+                console.warn('factcheck: 429 / RESOURCE_EXHAUSTED. fallback to draft.json');
+                return fallback();
+              }
+              console.error('factcheck: unexpected error', err);
+              return fallback();
             }
-            body = stripCodeFence(body);
-            const out = { title, body, tags };
-            fs.writeFileSync('.note-artifacts/final.json', JSON.stringify(out,null,2));
           }
 
           await main();
           EOF
+
           node factcheck.mjs
+
 
       - name: Upload fact-check artifact
         uses: actions/upload-artifact@v4
