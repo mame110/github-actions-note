@@ -131,8 +131,8 @@ jobs:
               model: google(modelName), // ★★★ここを google() に修正！★★★
               system: sys,
               prompt: userPrompt,
-              temperature: 0.5,
-              maxTokens: 8000,
+              temperature: 0.65,
+              maxTokens: 12000,
             });
             
             const assistantTexts = text || '';
@@ -236,7 +236,17 @@ jobs:
             return sanitizeTitle(firstReal);
           }
           
-          const sysWrite='あなたはnote.comに投稿するためのプロのライターです。長文の魅力的な記事を生成してください。\n必ず {"title":"記事タイトル","draftBody":"Markdown形式の記事本文","tags":["タグ1","タグ2"]} という厳密なJSON形式で返答してください。JSON以外のテキストは絶対に含めないでください。\ndraftBodyは6000〜9000文字を目安に十分な分量で、読者を惹きつける導入、具体的な内容（章ごとにH2（##）やH3（###）の小見出しと箇条書きを適切に含めること）、そして読後のアクション（CTA）に繋がる明確な結論を含めてください。';
+          const sysWrite = [
+               'あなたはnote.comに投稿する日本語ライターです。',
+               '口調はやわらかく、会話7 : 解説3くらいで書いてください。',
+               '専門用語を連発せず、出すときはすぐに「つまり〜」で言い換えてください。',
+               '1段落は3〜5行以内で。だらだら続けないでください。',
+               '構成は「導入 → 背景・理由 → 手順・やり方 → まとめ・CTA」の4ブロックで充分です。',
+               '全体の長さは3000〜4500文字を目安にしてください。長文が必要そうでも5000文字を超えないでください。',
+               '必ず {"title":"…","draftBody":"…","tags":[…]} のJSONだけを返してください。他の文章は書かないでください。',
+               'ドラマチックにしすぎず、実 務でそのまま使える説明を優先してください。',
+               '導入は「これ、困ってる人多いんですが…」のように読み手に寄り添う感じで始めてください。'
+              ].join('\n');
           const prompt=[
             "以下の要件とリサーチ内容に基づき、note.com用の記事をJSON形式で生成してください。",
             `{テーマ}: ${theme}`,
@@ -250,8 +260,8 @@ jobs:
             model: google(modelName), // ★★★ここを google() に修正！★★★
             system:sysWrite,
             prompt,
-            temperature:0.7,
-            maxTokens:30000,
+            temperature: 0.65,
+            maxTokens: 12000,
             // responseFormat: { type: 'json' }, // ★Gemini ProはJSONモードをサポートしてないことがあるので、いったんコメントアウト
           });
           
@@ -386,6 +396,7 @@ jobs:
             const sys=[
               'あなたは事実検証の専門家です。以下の原稿（note記事の下書き）に対し、提供されたエビデンス（Tavily検索結果）に基づき、',
               '誤情報の修正・低信頼出典の置換・信頼できる一次情報の本文内Markdownリンク埋め込みを行って、修正後の本文のみ返してください。',
+                'カジュアルで口語的な文体が来た場合は、それを維持してください。敬語に戻したり、硬い説明文に書き換えないでください。',
               '文体・構成は原稿を尊重し、必要に応じて本文末尾に参考文献セクションを追加してください。',
               '【重要】JSONやコードフェンス（```）は絶対に使わず、Markdownの本文だけを返してください。',
             ].join('\n');
@@ -397,8 +408,8 @@ jobs:
               model: google(modelName), // ★★★ここを google() に修正！★★★
               system: sys,
               prompt,
-              temperature: 0.3,
-              maxTokens: 30000,
+              temperature: 0.65,
+              maxTokens: 12000,
             });
             
             let body = stripCodeFence(text||'');
