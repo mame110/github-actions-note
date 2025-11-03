@@ -505,8 +505,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: note-debug-artifacts
-          path:
-            - network.har
-            - trace.zip
-            - post.log
-            - **/*.png
+          path: |
+            network.har
+            trace.zip
+            post.log
+            **/*.png                
