@@ -33,22 +33,38 @@ let page;
 let cleaned = false;
 let tracingStopped = false;
 
-async function copyToWorkspace(file) {
-  if (!file) return null;
-  const workspaceFile = path.join(workspaceDir, path.basename(file));
-  if (workspaceFile === file) return file;
-  try {
-    await fs.promises.copyFile(file, workspaceFile);
-    return workspaceFile;
-  } catch (error) {
-    try {
-      fs.copyFileSync(file, workspaceFile);
-      return workspaceFile;
-    } catch (fallbackError) {
-      console.error('Failed to copy screenshot to workspace:', fallbackError);
-      return file;
+async function fillTitleInput(value) {
+  const selectors = [
+    'textarea[placeholder*="タイトル" i]',
+    'textarea[aria-label*="タイトル" i]',
+    '[data-testid="title"] textarea',
+    '[data-testid="title"]',
+    'textarea[name="title"]'
+  ];
+
+  for (const selector of selectors) {
+    // Windowsだと locator が無いことがあるので waitForSelector を使う
+    const el = await page.waitForSelector(selector, { timeout: 8000 }).catch(() => null);
+    if (!el) continue;
+
+    // 画面に出てるようにしてから fill
+    await el.scrollIntoViewIfNeeded?.().catch(() => {});
+    const isEditable = await el.isEditable?.().catch(() => true);
+
+    if (isEditable) {
+      await el.fill(value);
+      return;
+    } else {
+      // contenteditable 対策
+      await el.click({ force: true });
+      await page.keyboard.press('Control+A').catch(() => {});
+      await page.keyboard.type(value);
+      return;
     }
   }
+
+  // どれも見つからなかったときの最後の保険
+  await page.keyboard.type(value);
 }
 
 async function snap(tag = 'snapshot') {
