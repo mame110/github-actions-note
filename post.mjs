@@ -389,12 +389,26 @@ const blocks = splitMarkdownBlocks(preBody);
 
 async function run() {
   try {
-    browser = await chromium.launch({ headless: true, args: ['--lang=ja-JP'] });
-    context = await browser.newContext({
-      storageState: STATE_PATH,
-      locale: 'ja-JP',
-      recordHar: { path: 'network.har', content: 'embed', mode: 'minimal' },
-    });
+    browser = await chromium.launch({
+  // ← まずヘッドレスをやめる
+  headless: false,
+  args: [
+    '--lang=ja-JP',
+    // ← botバレを少しでも減らすやつ
+    '--disable-blink-features=AutomationControlled',
+  ],
+});
+
+// 実PCのChromeっぽくする
+context = await browser.newContext({
+  storageState: STATE_PATH,       // ここはそのまま
+  locale: 'ja-JP',
+  viewport: { width: 1280, height: 720 },
+  userAgent:
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+  recordHar: { path: 'network.har', content: 'embed', mode: 'minimal' },
+});
+
     await context.tracing.start({ screenshots: true, snapshots: true });
     page = await context.newPage();
     page.setDefaultTimeout(180000);
